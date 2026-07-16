@@ -3,6 +3,9 @@
 
 import os
 import sys
+import ipaddress
+import socket
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 import re
 from nslookup import Nslookup
@@ -14,6 +17,18 @@ import json
 from flatten_json import flatten
 
 from BillCollectorServices import retrieve_from_service
+
+LOCAL_API_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "fc00::/7",
+        "::1/128",
+    )
+)
 
 # Function to extract strings before and within brackets
 def extract_strings(line):
@@ -78,6 +93,24 @@ def is_domain_local_ip(domain):
         print("No IP address received.")
         return False
 
+def is_api_url_local(url):
+    """Return True when an HTTP API URL resolves only to local addresses."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+        addresses = {
+            info[4][0]
+            for info in socket.getaddrinfo(parsed.hostname, parsed.port)
+        }
+        return bool(addresses) and all(
+            any(ipaddress.ip_address(address) in network
+                for network in LOCAL_API_NETWORKS)
+            for address in addresses
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+
 # Get web content
 def get_json(url):
     try:
@@ -128,10 +161,11 @@ class defs:
 
 def WebRetriDoc(self):
 
-    # Check if <domain> is resolvable and directs to a local IP address
-    ip = is_domain_local_ip(self.vault) 
-    if not ip: sys.exit(1)
-    else: print(f"{self.vault} is resolvable and directs to local IP {ip}")
+    # The vault may be hosted by Bitwarden Cloud. Only the local bw serve API
+    # must be restricted to a private, loopback, or container-network address.
+    if not is_api_url_local(self.api):
+        print("BW_API_URL must resolve only to local addresses.")
+        sys.exit(1)
 
     # Check if Bitarden API at <bw_api_url> responds with success=true
     ret, status = bitwarden_api_check_status(self.api)
