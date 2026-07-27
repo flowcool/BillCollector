@@ -416,7 +416,12 @@ def download_all_webelements(bcs, we):
 
         previous_files = set(os.listdir(bcs.dld))
         windows_before = set(bcs.drv.window_handles)
-        elements[index].click()
+        download_url = elements[index].get_attribute("href")
+        if not download_url:
+            raise RuntimeError(
+                f"Download element {index + 1} has no URL")
+        bcs.drv.execute_script(
+            "window.open(arguments[0], '_blank');", download_url)
         downloaded_files.extend(
             wait_for_new_download(bcs.dld, previous_files, we.timeout))
 
