@@ -1,0 +1,30 @@
+services:
+  # Supply your own private Bitwarden CLI service exposing `bw serve` on 8087.
+  # It must be healthy and unlocked before running BillCollector.
+
+  billcollector:
+    image: ghcr.io/flowcool/billcollector:sha-06f1d27
+    profiles: ["tools"]
+    restart: "no"
+    networks:
+      - billcollector
+    environment:
+      TZ: Europe/Zurich
+      BW_API_URL: http://bitwarden-cli:8087
+      BW_API_HOST: 127.0.0.1:8087
+    volumes:
+      - ./config/billcollector.ini:/config/billcollector.ini:ro
+      - ./recipes:/config/recipes:ro
+      - ./downloads:/apps/Downloads
+    entrypoint: ["/bin/bash", "-euc"]
+    command:
+      - |
+        cp /config/recipes/bc-recipe__*.yaml /apps/bc-recipes/
+        exec python3 ./BillCollector.py /config/billcollector.ini
+    cap_drop: [NET_RAW]
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  billcollector:
+    name: billcollector
