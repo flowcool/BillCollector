@@ -1,6 +1,8 @@
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -112,6 +114,19 @@ class RecipeValidationTests(unittest.TestCase):
                 side_effect=RuntimeError("login failed")):
             with self.assertRaisesRegex(RuntimeError, "login failed"):
                 perform_actions(browser)
+
+    def test_actions_do_not_log_subscriber_identifier(self):
+        subscriber = "sensitive-subscriber-id"
+        browser = SimpleNamespace(
+            usr=subscriber,
+            yml={"services": [{"serviceName": "free", "actions": []}]},
+        )
+        output = StringIO()
+
+        with redirect_stdout(output):
+            perform_actions(browser)
+
+        self.assertNotIn(subscriber, output.getvalue())
 
 
 if __name__ == "__main__":
