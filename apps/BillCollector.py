@@ -3,6 +3,7 @@
 
 import os
 import sys
+from contextlib import nullcontext
 import ipaddress
 import socket
 from urllib.parse import quote, urlparse
@@ -17,6 +18,7 @@ import json
 from flatten_json import flatten
 
 from BillCollectorServices import retrieve_from_service
+from BillCollectorState import DownloadStateLock
 
 LOCAL_API_NETWORKS = tuple(
     ipaddress.ip_network(network)
@@ -199,6 +201,13 @@ class defs:
         self.debug = debug
 
 def WebRetriDoc(self):
+    state_dir = os.getenv("BILLCOLLECTOR_STATE_DIR")
+    lock = DownloadStateLock(state_dir) if state_dir else nullcontext()
+    with lock:
+        return WebRetriDocUnlocked(self)
+
+
+def WebRetriDocUnlocked(self):
 
     # The vault may be hosted by Bitwarden Cloud. Only the local bw serve API
     # must be restricted to a private, loopback, or container-network address.

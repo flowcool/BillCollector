@@ -80,7 +80,7 @@ The complete example is in
 Create the local directories:
 
 ```bash
-mkdir -p config recipes downloads state
+mkdir -p config recipes downloads staging state
 ```
 
 Create `config/billcollector.ini`:

@@ -35,13 +35,18 @@ environment:
   BILLCOLLECTOR_STATE_DIR: /apps/state
   BILLCOLLECTOR_OUTPUT_DIR: /apps/Output
 volumes:
+  - ./staging:/apps/Downloads
   - ./state:/apps/state
   - ./downloads:/apps/Output
 ```
 
-Do not mount Paperless directly on `/apps/Downloads` in this mode.
-`/apps/Downloads` is temporary staging inside the one-shot container. If
-neither variable is configured, BillCollector retains its historical behavior.
+Do not mount Paperless directly on `/apps/Downloads` in this mode. The migration
+must replace that mount, never add the new output mount beside it. Otherwise
+Paperless sees the raw file before deduplication.
+
+Mount staging and output on the same host filesystem so publication is an
+atomic rename instead of a cross-filesystem copy followed by unlink. If neither
+variable is configured, BillCollector retains its historical behavior.
 Configuring only one variable is an error.
 
 ## Decision order
@@ -67,23 +72,37 @@ run may publish a duplicate. Saving state first could permanently lose a
 document, which is the less acceptable outcome.
 
 Invalid or unsupported state fails closed. BillCollector never silently resets
-the history.
+the history. Each update flushes the temporary file, preserves the previous
+valid state as `downloads-v1.json.bak`, atomically replaces the primary file,
+and flushes the state directory.
 
 ## Operations
 
 - Back up the entire state directory.
-- Keep it writable only by BillCollector's UID/GID.
+- Recommended host permissions are owner `1000`, group `1000`, mode `750`.
+  BillCollector writes as UID/GID 1000; a backup agent in group 1000 may read
+  the hashes.
 - Never edit `downloads-v1.json` manually.
-- Do not run two BillCollector jobs concurrently against the same state.
+- Concurrent jobs against the same state fail immediately on an engine lock.
 - Restore state together with the corresponding Paperless environment.
 - Deleting state deliberately causes the next run to treat the full portal
   history as new.
+- When Paperless is restored to an older point in time, archive then remove the
+  BillCollector state before the next run. Keeping a newer state would silently
+  skip invoices that no longer exist in the restored Paperless database.
+- If the primary JSON is corrupt, stop the job and restore
+  `downloads-v1.json.bak`; never reset it automatically.
 
 ## Current scope
 
 Persistent deduplication currently applies to `DownloadAll`, including the
 validated Freebox recipe. The legacy `Download` action keeps its previous
 behavior until it has a reliable pre-download document identity.
+
+A filename collision in the output directory aborts the current run. Documents
+published before the collision are already recorded, so a later run resumes
+without republishing them. Hash lists are intentionally unbounded; their size
+is negligible for invoice-scale workloads.
 
 Scheduling remains an operational decision. Before enabling it, prove:
 

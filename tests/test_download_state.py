@@ -3,12 +3,17 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 APPS = Path(__file__).resolve().parents[1] / "apps"
 sys.path.insert(0, str(APPS))
 
-from BillCollectorState import DownloadState, sha256_text  # noqa: E402
+from BillCollectorState import (  # noqa: E402
+    DownloadState,
+    DownloadStateLock,
+    sha256_text,
+)
 
 
 class DownloadStateTests(unittest.TestCase):
@@ -85,3 +90,44 @@ class DownloadStateTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "state is invalid"):
                 DownloadState(state_dir, "account")
 
+    def test_concurrent_state_lock_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with DownloadStateLock(temp_dir):
+                with self.assertRaisesRegex(
+                        RuntimeError, "Another BillCollector job"):
+                    DownloadStateLock(temp_dir)
+
+    def test_previous_valid_state_is_kept_as_backup(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            state = DownloadState(root / "state", "account")
+            first = downloads / "first.pdf"
+            first.write_bytes(b"first")
+            state.publish("https://example.test/1", first, root / "output")
+            first_state = json.loads(
+                (root / "state" / "downloads-v1.json").read_text())
+            second = downloads / "second.pdf"
+            second.write_bytes(b"second")
+
+            state.publish("https://example.test/2", second, root / "output")
+
+            backup_state = json.loads(
+                (root / "state" / "downloads-v1.json.bak").read_text())
+            self.assertEqual(backup_state, first_state)
+
+    def test_state_file_and_directory_are_fsynced(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            invoice = downloads / "invoice.pdf"
+            invoice.write_bytes(b"invoice")
+            state = DownloadState(root / "state", "account")
+
+            with patch("BillCollectorState.os.fsync") as fsync:
+                state.publish(
+                    "https://example.test/1", invoice, root / "output")
+
+            self.assertGreaterEqual(fsync.call_count, 2)

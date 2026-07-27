@@ -2,10 +2,36 @@ import hashlib
 import json
 import os
 import shutil
+import fcntl
 from pathlib import Path
 
 
 STATE_VERSION = 1
+
+
+class DownloadStateLock:
+    """Prevent concurrent jobs from updating the same state directory."""
+
+    def __init__(self, state_dir):
+        self.state_dir = Path(state_dir)
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.lock_file = open(
+            self.state_dir / "billcollector.lock", "a+", encoding="utf-8")
+        try:
+            fcntl.flock(
+                self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            self.lock_file.close()
+            raise RuntimeError(
+                "Another BillCollector job is using this state directory"
+            ) from error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _error_type, _error, _traceback):
+        fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
+        self.lock_file.close()
 
 
 def sha256_text(value):
@@ -26,6 +52,7 @@ class DownloadState:
     def __init__(self, state_dir, account_id):
         self.state_dir = Path(state_dir)
         self.state_file = self.state_dir / "downloads-v1.json"
+        self.backup_file = self.state_dir / "downloads-v1.json.bak"
         self.account_key = sha256_text(account_id)
         self.data = self._load()
 
@@ -82,7 +109,22 @@ class DownloadState:
 
     def _save(self):
         temporary = self.state_file.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(self.data, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8")
+        with open(temporary, "w", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(self.data, indent=2, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        if self.state_file.exists():
+            backup_temporary = self.backup_file.with_suffix(".bak.tmp")
+            shutil.copyfile(self.state_file, backup_temporary)
+            with open(backup_temporary, "rb") as stream:
+                os.fsync(stream.fileno())
+            os.replace(backup_temporary, self.backup_file)
+
         os.replace(temporary, self.state_file)
+        directory_fd = os.open(self.state_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
