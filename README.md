@@ -81,6 +81,8 @@ Create the local directories:
 
 ```bash
 mkdir -p config recipes downloads staging state
+sudo chown 1000:1000 state
+sudo chmod 2750 state
 ```
 
 Create `config/billcollector.ini`:
@@ -117,7 +119,9 @@ Inspect the logs and `./downloads` before enabling any scheduler.
 The example enables persistent deduplication. Downloads first land in temporary
 container staging, then unique documents are moved to `./downloads`. Persistent
 hashes are stored in `./state`; back it up and never run concurrent jobs
-against it. See [`docs/DEDUPLICATION.md`](docs/DEDUPLICATION.md).
+against it. Exclude `./staging` from backups. After restoring `./state`, reapply
+owner/group `1000:1000` and mode `2750`. See
+[`docs/DEDUPLICATION.md`](docs/DEDUPLICATION.md).
 
 ## Installing recipes
 

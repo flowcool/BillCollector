@@ -81,9 +81,14 @@ and flushes the state directory.
 ## Operations
 
 - Back up the entire state directory.
-- Recommended host permissions are owner `1000`, group `1000`, mode `750`.
+- Recommended host permissions are owner `1000`, group `1000`, mode `2750`.
   BillCollector writes as UID/GID 1000; a backup agent in group 1000 may read
-  the hashes.
+  the hashes. The setgid bit keeps group `1000` on files created by an
+  operator during a manual restore, not only on files written by the engine.
+- After restoring the state directory, reapply owner/group `1000:1000` and
+  mode `2750`; file ownership is not necessarily preserved by backup tools.
+- Exclude the staging directory from backups. It is disposable, may contain
+  transient invoices, and must not be versioned as configuration data.
 - Never edit `downloads-v1.json` manually.
 - Concurrent jobs against the same state fail immediately on an engine lock.
 - Restore state together with the corresponding Paperless environment.
