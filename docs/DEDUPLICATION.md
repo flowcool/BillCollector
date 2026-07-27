@@ -102,9 +102,11 @@ and flushes the state directory.
 
 ## Current scope
 
-Persistent deduplication currently applies to `DownloadAll`, including the
-validated Freebox recipe. The legacy `Download` action keeps its previous
-behavior until it has a reliable pre-download document identity.
+Persistent deduplication applies to both `DownloadAll`, including the validated
+Freebox recipe, and the legacy `Download` action. `Download` must fetch the
+candidate file before deciding because button-based recipes do not always
+expose a reliable document URL. Known document names or content are removed
+from staging and are not published again.
 
 Free regenerates invoice URLs and PDF bytes between sessions while keeping a
 stable final invoice filename. Filename identity is therefore authoritative for

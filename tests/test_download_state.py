@@ -56,6 +56,21 @@ class DownloadStateTests(unittest.TestCase):
             self.assertFalse(
                 DownloadState(root / "state", "other-account").has_url(url))
 
+    def test_reused_page_url_is_stored_only_once(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            state = DownloadState(root / "state", "account")
+            url = "https://provider.test/invoices"
+            for name in ("invoice-1.pdf", "invoice-2.pdf"):
+                invoice = downloads / name
+                invoice.write_bytes(name.encode())
+                state.publish(url, invoice, root / "output")
+
+            account = next(iter(state.data["accounts"].values()))
+            self.assertEqual(len(account["urls"]), 1)
+
     def test_duplicate_content_with_new_url_is_not_published(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

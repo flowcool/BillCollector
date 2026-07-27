@@ -57,7 +57,7 @@ the URL of its private local API.
 - Container architecture: `linux/amd64`
 - Recipes: beta, because provider portals can change without notice
 - Scheduling: only after a recipe has passed repeated manual runs
-- Persistent `DownloadAll` deduplication: available when state and output
+- Persistent `Download` and `DownloadAll` deduplication: available when state and output
   directories are configured
 
 Use an immutable image tag, and preferably its digest, in production. Available

@@ -419,10 +419,28 @@ def sendkeys_webelement(bcs, we):
 # Download file from web element
 # Checks download folder for new downloaded file and returns the name of the downloaded file
 def download_webelement(bcs, we):
-    prev_file = latest_download_file(bcs.dld)
-    click_webelement(bcs,we)
-    time.sleep(5)
-    return is_download_finished(bcs.dld, prev_file)
+    selector = we.selectors[0]
+    element = bcs.drv.find_element(selector.locator, selector.element)
+    download_url = element.get_attribute("href") or bcs.drv.current_url
+    previous_files = set(os.listdir(bcs.dld))
+    click_webelement(bcs, we)
+    new_files = wait_for_new_download(
+        bcs.dld, previous_files, we.timeout)
+    if len(new_files) != 1:
+        raise RuntimeError(
+            f"Download action produced {len(new_files)} completed files")
+
+    filename = new_files[0]
+    state = getattr(bcs, "state", None)
+    if not state:
+        return filename
+    published = state.publish(
+        download_url,
+        os.path.join(bcs.dld, filename),
+        bcs.output_dir)
+    if published is None:
+        print("      Skipping known document.")
+    return published
 
 def download_all_webelements(bcs, we):
     selector = we.selectors[0]
