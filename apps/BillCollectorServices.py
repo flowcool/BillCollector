@@ -154,11 +154,15 @@ def retrieve_from_service(service, url, user, pwd, otp, debug):
         bcs.yml = CheckRecipe(f"{os.path.dirname(os.path.realpath(__file__))}/bc-recipes/bc-recipe__{sname}.yaml")
         if bcs.yml == None: raise Exception(f"Recipe {sname} not found.")
         file_downloaded = perform_actions(bcs)
-        if file_downloaded != None: print(f"Service {service} for {bcs.usr} finished with downloaded file(s) {file_downloaded}.")
-        else: print(f"Service {service} for {bcs.usr} finished without a file downloaded.")
+        if file_downloaded:
+            print(
+                f"Service {service} finished with "
+                f"{len(file_downloaded)} downloaded file(s).")
+        else:
+            print(f"Service {service} finished without a file downloaded.")
     except Exception as e:
         print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
-        print(f"Service {service} for {bcs.usr} not successfully finished.")
+        print(f"Service {service} not successfully finished.")
         bcs.drv.quit()
         on_debug_stop_keyboard_listener(bcs)
         return False
@@ -174,7 +178,7 @@ def perform_actions(bcs):
 
     for service in services:
         service_name = service.get('serviceName')
-        print(f"Processing Service: {service_name} for {bcs.usr}.")
+        print(f"Processing Service: {service_name}.")
 
         actions = service.get('actions', [])
         for action in sorted(actions, key=lambda x: x.get('step', 0)):
