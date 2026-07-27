@@ -14,7 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 APPS = ROOT / "apps"
 sys.path.insert(0, str(APPS))
 
-from BillCollectorRecipes import CheckRecipe, is_yaml_file  # noqa: E402
+from BillCollectorRecipes import (  # noqa: E402
+    CheckRecipe,
+    CheckRecipeMetadata,
+    is_yaml_file,
+)
 from BillCollectorServices import (  # noqa: E402
     ACTION_MAP,
     download_all_webelements,
@@ -44,6 +48,55 @@ class RecipeValidationTests(unittest.TestCase):
             ["items"]["properties"]["actionType"]["enum"]
         )
         self.assertEqual(action_types, set(ACTION_MAP))
+
+    def test_free_recipe_metadata_is_compatible(self):
+        metadata = CheckRecipeMetadata(
+            APPS / "bc-recipes" / "bc-metadata__free.yaml",
+            "free",
+            ACTION_MAP,
+        )
+
+        self.assertEqual(metadata["recipeFormatVersion"], 1)
+
+    def test_newer_recipe_format_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata = Path(temp_dir) / "bc-metadata__free.yaml"
+            metadata.write_text(
+                "service: free\n"
+                "recipeVersion: 1.0.0\n"
+                "recipeFormatVersion: 999\n"
+                "requiredActions: [Click]\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                    RuntimeError, "requires recipe format 999"):
+                CheckRecipeMetadata(
+                    metadata,
+                    "free",
+                    ACTION_MAP,
+                    APPS / "bc-recipes" / "bc-metadata-schema.yaml",
+                )
+
+    def test_unsupported_recipe_action_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata = Path(temp_dir) / "bc-metadata__free.yaml"
+            metadata.write_text(
+                "service: free\n"
+                "recipeVersion: 1.0.0\n"
+                "recipeFormatVersion: 1\n"
+                "requiredActions: [FutureAction]\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                    RuntimeError, "unsupported actions: FutureAction"):
+                CheckRecipeMetadata(
+                    metadata,
+                    "free",
+                    ACTION_MAP,
+                    APPS / "bc-recipes" / "bc-metadata-schema.yaml",
+                )
 
     def test_invalid_yaml_returns_a_validation_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -19,7 +19,7 @@ services:
     entrypoint: ["/bin/bash", "-euc"]
     command:
       - |
-        cp /config/recipes/bc-recipe__*.yaml /apps/bc-recipes/
+        cp /config/recipes/bc-*.yaml /apps/bc-recipes/
         exec python3 ./BillCollector.py /config/billcollector.ini
     cap_drop: [NET_RAW]
     security_opt:

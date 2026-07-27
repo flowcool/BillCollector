@@ -1,0 +1,8 @@
+---
+service: "free"
+recipeVersion: "0.1.0"
+recipeFormatVersion: 1
+requiredActions:
+  - "SendKeys"
+  - "Click"
+  - "DownloadAll"

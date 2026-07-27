@@ -3,6 +3,8 @@ import sys
 import yaml
 from jsonschema import validate, ValidationError
 
+SUPPORTED_RECIPE_FORMAT_VERSION = 1
+
 def is_yaml_file(stream):
     try:
         yml = yaml.safe_load(stream)  
@@ -41,6 +43,49 @@ def CheckRecipe(recipe_file, schema_file=os.path.join(os.path.dirname(__file__),
     except Exception as e:
         print(f"Error: {e}")
         return None
+
+def CheckRecipeMetadata(
+        metadata_file,
+        service_name,
+        supported_actions,
+        schema_file=os.path.join(
+            os.path.dirname(__file__),
+            "bc-recipes",
+            "bc-metadata-schema.yaml")):
+    """Validate an optional recipe compatibility contract."""
+    if not os.path.isfile(metadata_file):
+        return None
+
+    try:
+        with open(schema_file, "r", encoding="utf-8") as stream:
+            schema = yaml.safe_load(stream)
+        with open(metadata_file, "r", encoding="utf-8") as stream:
+            metadata = yaml.safe_load(stream)
+        validate(instance=metadata, schema=schema)
+    except (OSError, yaml.YAMLError, ValidationError) as error:
+        raise RuntimeError(
+            f"Invalid compatibility metadata for service {service_name}"
+        ) from error
+
+    if metadata["service"] != service_name:
+        raise RuntimeError(
+            f"Recipe metadata service mismatch: expected {service_name}")
+
+    format_version = metadata["recipeFormatVersion"]
+    if format_version > SUPPORTED_RECIPE_FORMAT_VERSION:
+        raise RuntimeError(
+            f"Recipe {service_name} requires recipe format "
+            f"{format_version}; engine supports "
+            f"{SUPPORTED_RECIPE_FORMAT_VERSION}")
+
+    missing_actions = sorted(
+        set(metadata["requiredActions"]) - set(supported_actions))
+    if missing_actions:
+        raise RuntimeError(
+            f"Recipe {service_name} requires unsupported actions: "
+            f"{', '.join(missing_actions)}")
+
+    return metadata
 
 if __name__ == "__main__":
     sys.stdout = sys.__stdout__
