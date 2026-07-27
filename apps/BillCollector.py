@@ -248,9 +248,7 @@ if __name__ == "__main__":
 
     logfile = "./BillCollector.log"
     log_setup(logfile)
-    if bc.debug == False: 
-        print = logging.debug   # looging into file or stdout
-   
+
     WebRetriDoc(bc)
 
 else:
