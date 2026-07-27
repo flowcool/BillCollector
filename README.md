@@ -20,7 +20,7 @@ format. This fork keeps that design and adds:
 - a reproducible, non-root `linux/amd64` container published on GHCR;
 - support for Bitwarden Cloud through a private local `bw serve` API;
 - exact Bitwarden item matching;
-- standard container logs with sensitive subscriber labels redacted;
+- standard container logs without credential values in action traces;
 - recipe validation in CI;
 - the `DownloadAll` action required by portals exposing invoice histories;
 - hardened and direct handling of download links used by modern portals.
@@ -249,6 +249,8 @@ See the companion recipes repository for contribution rules and metadata.
 - Mount configuration and recipes read-only.
 - Never commit real account names, identifiers, passwords, cookies, HTML dumps,
   downloaded invoices, or Bitwarden exports.
+- Account labels are included in operational logs to identify failing accounts;
+  sanitize logs before sharing them publicly.
 - Chrome currently runs with `--no-sandbox`; compensate with container
   isolation, a non-root user, dropped capabilities, and
   `no-new-privileges:true`.
