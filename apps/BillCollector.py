@@ -248,7 +248,8 @@ def WebRetriDoc(self):
 
             # Download Documents
             if not retrieve_from_service(
-                    servicename, uri, username, passsword, totp, self.debug):
+                    servicename, uri, username, passsword, totp, self.debug,
+                    item["id"]):
                 raise RuntimeError(
                     f"Service {service_user} did not complete successfully")
     file.close()

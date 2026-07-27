@@ -18,6 +18,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from BillCollectorRecipes import CheckRecipe, CheckRecipeMetadata
+from BillCollectorState import DownloadState
 
 # Initialize browser and return driver object
 # parameterize browser: in debug mode = headless, default download folder, force download by always open pdf externally, ...
@@ -89,7 +90,9 @@ def pause_check():
 #
 # Service variables
 class service_vars:
-    def __init__(self, usr, pwd, otp, dbg, dld, yml=None, drv=None):
+    def __init__(
+            self, usr, pwd, otp, dbg, dld, yml=None, drv=None,
+            state=None, output_dir=None):
         self.drv = drv
         self.usr = usr
         self.pwd = pwd
@@ -97,6 +100,8 @@ class service_vars:
         self.dbg = dbg
         self.dld = dld
         self.yml = yml
+        self.state = state
+        self.output_dir = output_dir
 
 # Web Element Object
 class webElementObj:
@@ -139,9 +144,27 @@ VARIABLE_MAP = {
 }
 
 # Retrieve file from service - main function
-def retrieve_from_service(service, url, user, pwd, otp, debug):
+def retrieve_from_service(
+        service, url, user, pwd, otp, debug, account_id=None):
     
-    bcs = service_vars(usr=user, pwd=pwd, otp=otp, dbg=debug, dld=f"{os.path.dirname(os.path.realpath(__file__))}/Downloads")
+    app_dir = os.path.dirname(os.path.realpath(__file__))
+    state_dir = os.getenv("BILLCOLLECTOR_STATE_DIR")
+    output_dir = os.getenv("BILLCOLLECTOR_OUTPUT_DIR")
+    if bool(state_dir) != bool(output_dir):
+        raise RuntimeError(
+            "BILLCOLLECTOR_STATE_DIR and BILLCOLLECTOR_OUTPUT_DIR "
+            "must be configured together")
+    if state_dir and not account_id:
+        raise RuntimeError("Persistent deduplication requires an account ID")
+    state = DownloadState(state_dir, account_id) if state_dir else None
+    bcs = service_vars(
+        usr=user,
+        pwd=pwd,
+        otp=otp,
+        dbg=debug,
+        dld=f"{app_dir}/Downloads",
+        state=state,
+        output_dir=output_dir)
     if not os.path.exists(bcs.dld):
         os.makedirs(bcs.dld)
     sname = service.lower().replace(" ", "_")
@@ -427,10 +450,26 @@ def download_all_webelements(bcs, we):
         if not download_url:
             raise RuntimeError(
                 f"Download element {index + 1} has no URL")
+        state = getattr(bcs, "state", None)
+        if state and state.has_url(download_url):
+            print(f"      Skipping known document {index + 1}.")
+            continue
         bcs.drv.execute_script(
             "window.open(arguments[0], '_blank');", download_url)
-        downloaded_files.extend(
-            wait_for_new_download(bcs.dld, previous_files, we.timeout))
+        new_files = wait_for_new_download(
+            bcs.dld, previous_files, we.timeout)
+        if state:
+            for filename in new_files:
+                published = state.publish(
+                    download_url,
+                    os.path.join(bcs.dld, filename),
+                    bcs.output_dir)
+                if published is not None:
+                    downloaded_files.append(published)
+                else:
+                    print(f"      Skipping duplicate content {index + 1}.")
+        else:
+            downloaded_files.extend(new_files)
 
         new_windows = set(bcs.drv.window_handles) - windows_before
         for window in new_windows:

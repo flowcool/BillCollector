@@ -12,10 +12,13 @@ services:
       TZ: Europe/Zurich
       BW_API_URL: http://bitwarden-cli:8087
       BW_API_HOST: 127.0.0.1:8087
+      BILLCOLLECTOR_STATE_DIR: /apps/state
+      BILLCOLLECTOR_OUTPUT_DIR: /apps/Output
     volumes:
       - ./config/billcollector.ini:/config/billcollector.ini:ro
       - ./recipes:/config/recipes:ro
-      - ./downloads:/apps/Downloads
+      - ./state:/apps/state
+      - ./downloads:/apps/Output
     entrypoint: ["/bin/bash", "-euc"]
     command:
       - |
