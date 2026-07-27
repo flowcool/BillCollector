@@ -1,316 +1,289 @@
 # BillCollector
 
-![BillCollector EyeCatcher](/doc/BillCollector_EyeCatcher.jpg)
+BillCollector downloads invoices and documents from customer portals by running
+versioned Selenium recipes. Downloaded files can then be consumed by
+[Paperless-ngx](https://docs.paperless-ngx.com/) or any other document
+management system.
 
-## Table of Contents
+> [!IMPORTANT]
+> This repository is a maintained fork of
+> [s-t-e-f-a-n/BillCollector](https://github.com/s-t-e-f-a-n/BillCollector).
+> We intend to keep following upstream and contribute compatible improvements
+> back whenever possible. The fork currently carries production-tested changes
+> that have not all been accepted upstream.
 
-- [What is BillCollector?](#what-is-billcollector)
-- [How does it work?](#how-does-it-work)
-- [Contributing](#contributing)
-- [Quick Start](#quick-start)
-  - [Docker Environment](#docker-environment)
-  - [Vault of Secrets](#vault-of-secrets)
-  - [Enabling DNS and HTTPS with Let's Encrypt certs](#enabling-dns-and-https-with-lets-encrypt-certs)
-  - [The BillCollector Installation](#the-billcollector-installation-and-docker-deployment)
-- [Configure BillCollector](#configuration)
-  - [Vaultwarden and Bitwarden](#vaultwarden-and-bitwarden)
-  - [Optional: Vscode and Debuggin](#optional-vscode-and-debugging)
-  - [Web Service Config](#web-service-config)
+## Why this fork exists
 
-## What is BillCollector?
+The original project provided the browser automation engine and its YAML recipe
+format. This fork keeps that design and adds:
 
-> BillCollector is the automated front end for processing important documents in personal web portals that previously had to be tediously downloaded by hand.
->
-> Invoices and documents that are regularly stored by service providers in the respective online account are automatically retrieved by BillCollector and stored locally in a download folder from where it may be consumed by a document management system like Paperless-ngx.
+- a reproducible, non-root `linux/amd64` container published on GHCR;
+- support for Bitwarden Cloud through a private local `bw serve` API;
+- exact Bitwarden item matching;
+- standard container logs without credential values in action traces;
+- recipe validation in CI;
+- the `DownloadAll` action required by portals exposing invoice histories;
+- hardened and direct handling of download links used by modern portals.
 
-BillCollector uses:
+The first end-to-end production validation of these additions used the Freebox
+Internet portal on 2026-07-27.
 
-- Vaultwarden as a safe vault of the login data for the online accounts
-- Chrome for testing and Chromedriver as the browser front end of the service provider's online portal
-- Selenium (for Python) to automate the browser control
+## How it works
 
-Chrome is operated headless by default, so that BillCollector can do its job on a Raspberry PI or a NAS, headless integrated into the cron-scheduler on a regular basis.
+```text
+Bitwarden Cloud or Vaultwarden
+              |
+              v
+     local `bw serve` API
+              |
+              v
+        BillCollector
+     + Selenium recipe
+              |
+              v
+       Downloads folder
+              |
+              v
+        Paperless-ngx
+```
 
-Following diagram depicts the complete BillCollector Ecosystem:
+BillCollector never needs the Bitwarden account password or API credentials.
+Those belong to the separate Bitwarden CLI service. BillCollector only receives
+the URL of its private local API.
 
-![BillCollector Ecosystem](/doc/BillCollector.svg)
+## Current status
 
-## How does it work?
+- Maintained fork: usable
+- Container architecture: `linux/amd64`
+- Recipes: beta, because provider portals can change without notice
+- Scheduling: only after a recipe has passed repeated manual runs
+- Built-in download deduplication: not available yet
 
-Scheduled, for instance, bi-monthly, your server's cron daemon runs the BillCollector docker container which exposes a download folder to the server's file system. The docker container integrates Chrome and Chromedriver to interact with the service provider's online portal.
+Use an immutable image tag, and preferably its digest, in production. Available
+tags are published in the repository's GitHub Container Registry.
 
-For each container run, BillCollector scripts the `List of Services`, gets the secret login data from Vaultwarden via the Bitwarden API, accesses the web service via the configured Selenium recipes, and downloads the documents.
+## Quick start
 
-With a document-processing document management system (DMS) such as Paperless ngx in place, the downloaded file is consumed, automatically analyzed, tagged, and sorted.
+You need:
+
+- Docker with Compose;
+- a healthy and unlocked Bitwarden CLI `bw serve` endpoint reachable only on a
+  private container network;
+- one Bitwarden login item per account;
+- a service list;
+- one compatible recipe per service.
+
+The complete example is in
+[`examples/docker-compose.yml`](examples/docker-compose.yml).
+
+Create the local directories:
+
+```bash
+mkdir -p config recipes downloads
+```
+
+Create `config/billcollector.ini`:
+
+```ini
+Free [Home]
+```
+
+This line has two distinct effects:
+
+- BillCollector loads `bc-recipe__free.yaml`;
+- BillCollector requests the exact Bitwarden item named `Free Home`.
+
+Create that Bitwarden login item with:
+
+```text
+Name: Free Home
+Username: your provider identifier
+Password: your provider password
+URI: https://subscribe.free.fr/login/
+```
+
+Do not put credentials in the INI file, recipe, Compose file, image, or Git
+repository.
+
+Install a compatible recipe in `./recipes`, then run:
+
+```bash
+docker compose --profile tools run --rm --no-deps billcollector
+```
+
+Inspect the logs and `./downloads` before enabling any scheduler.
+
+## Installing recipes
+
+Recipes are distributed separately from the engine so they can evolve at their
+own pace. Production installations should use a tagged recipe release, never a
+moving `main` branch.
+
+The recommended layout is:
+
+```text
+deployment/
+├── compose.yml
+├── config/
+│   └── billcollector.ini
+├── recipes/
+│   └── bc-recipe__free.yaml
+└── downloads/
+```
+
+Mount the recipe directory read-only:
+
+```yaml
+volumes:
+  - ./recipes:/config/recipes:ro
+  - ./config/billcollector.ini:/config/billcollector.ini:ro
+  - ./downloads:/apps/Downloads
+```
+
+The container command copies the selected read-only recipes into an ephemeral
+runtime directory before starting BillCollector. See the supplied Compose
+example for the complete command.
+
+Recipe releases, compatibility metadata, update instructions, and rollback
+instructions live in the companion `billcollector-recipes` repository.
+
+## Configuration reference
+
+### `BW_API_URL`
+
+Required. URL of the local `bw serve` API, for example:
+
+```text
+http://bitwarden-cli:8087
+```
+
+It must resolve to a loopback, private, or container-network address. Do not
+publish this API on the Internet.
+
+### `BW_API_HOST`
+
+Optional HTTP `Host` header override. Some `bw serve` versions protect against
+DNS rebinding and only accept their loopback host:
+
+```text
+127.0.0.1:8087
+```
+
+### Service list
+
+Each non-empty line in the INI file selects a recipe:
+
+```ini
+KabelDeutschland
+Free [Home]
+Lichtblick [Strom, Gas]
+```
+
+The bracket syntax reuses one provider recipe for several exact Bitwarden
+items:
+
+```text
+Free [Home]            -> recipe free, item "Free Home"
+Lichtblick [Strom, Gas] -> recipe lichtblick, items "Lichtblick Strom"
+                           and "Lichtblick Gas"
+```
+
+### Recipe filenames
+
+The normalized service name determines the filename:
+
+```text
+Free              -> bc-recipe__free.yaml
+Freenet Mobilfunk -> bc-recipe__freenet_mobilfunk.yaml
+```
+
+## Safe operating model
+
+1. Pin the BillCollector image.
+2. Pin a tagged recipes release.
+3. Run a new or updated recipe manually.
+4. Confirm the expected PDFs and sanitized logs.
+5. Keep the previous recipes release available for rollback.
+6. Schedule only after repeated successful runs.
+
+Tracking the recipes repository's `main` branch automatically is intentionally
+discouraged: a portal or selector change must not silently alter a working
+production job.
+
+## Developing and validating a recipe
+
+Recipes use YAML and Selenium locators. The schema is stored in
+`apps/bc-recipes/bc-recipe-schema.yaml`.
+
+Validate all bundled recipes:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Validate one recipe:
+
+```bash
+python3 apps/BillCollectorRecipes.py \
+  apps/bc-recipes/bc-recipe__free.yaml \
+  apps/bc-recipes/bc-recipe-schema.yaml
+```
+
+Supported actions currently include:
+
+- `Click`
+- `ClickShadow`
+- `SendKeys`
+- `SwitchToFrame`
+- `SwitchToDefaultFrame`
+- `SwitchToParentFrame`
+- `Download`
+- `DownloadAll`
+
+See the companion recipes repository for contribution rules and metadata.
+
+## Security notes
+
+- Keep `bw serve` on a private network with no published host port.
+- Run BillCollector as a one-shot job with `--rm`.
+- Mount configuration and recipes read-only.
+- Never commit real account names, identifiers, passwords, cookies, HTML dumps,
+  downloaded invoices, or Bitwarden exports.
+- Account labels are included in operational logs to identify failing accounts;
+  sanitize logs before sharing them publicly.
+- Chrome currently runs with `--no-sandbox`; compensate with container
+  isolation, a non-root user, dropped capabilities, and
+  `no-new-privileges:true`.
+
+## Upstream relationship
+
+The `upstream` Git remote should continue to point to the original project:
+
+```bash
+git remote add upstream https://github.com/s-t-e-f-a-n/BillCollector.git
+git fetch upstream
+```
+
+Changes that remain broadly useful and compatible should be proposed upstream
+in focused pull requests. Fork-specific releases remain available while those
+proposals are pending.
 
 ## Contributing
 
-### How You Can Help
+Engine fixes belong in this repository. Provider-specific YAML recipes belong
+in the companion recipes repository.
 
-- **Star this project** on GitHub.
-- **Share** it with your network.
-- **Contribute** recipes for more web services - see how to [Configure BillCollector](#configuration) and get familiar with the YAML recipes. Share your recipes 🙂🙂🙂
-- **Discuss** your ideas for improvements, more use cases and any comments by leaving notes in the Discussion area.
+Before opening a change:
 
-> 💡 **Tip**  
-> Make yourself familiar with the concept of finding web elements. BillCollector takes advantage of Selenium and its methods for retrieving and controlling web elements.  
-> [Selenium WebDriver Elements Documentation](https://www.selenium.dev/documentation/webdriver/elements/) is a good starting point.
+```bash
+python3 -m py_compile apps/*.py
+python3 -m unittest discover -s tests -v
+```
 
-## Quick Start
+Please keep fixtures sanitized and describe how a change was validated without
+including subscriber data.
 
-BillCollector requires the following services:
+## License and attribution
 
-- Docker environment
-- Vaultwarden (docker image: vaultwarden/server:latest) with Bitwarden API (<https://bitwarden.com/help/vault-management-api/>) in one docker stack
-- Secure HTTPS access for account management and usage of Vaultwarden with:
-  - nginxproxymanager with Let's Encrypt (docker image: jc21/nginx-proxy-manager:latest)
-  - Duckdns account & config -> redirect to local IP address
-
-### Docker Environment
-
-It is assumed that you have a docker environment up and running. There are different options you can choose from: Docker Desktop on a Linux or Windows machine or for your Mac, docker on the command line, etc.
-
-I have it running on my self-built Mini-ITX Intel Pentium J5040 NAS hardware equipped with the Debian Linux based NAS operating system [openmediavault](https://www.openmediavault.org/) (OMV).
-
-### Vault of Secrets
-
-BillCollector uses the self-hosted [Vaultwarden](https://github.com/dani-garcia/vaultwarden) password manager.
-
-Why Vaultwarden?
-
-1. It is a resource-light-weight alternative to Bitwarden.
-2. It is compatible with the Bitwarden Vault Management API integrated in the [Bitwarden CLI](https://github.com/bitwarden/cli) which BillCollector uses for login data retrieval.
-3. It stores your login data safely.
-4. It is feature-rich, including the management of Time-Based One-Time (TOTP) passwords.
-
-> 💡 **Tip**  
-> On [Vaultwarden Docker](https://github.com/s-t-e-f-a-n/Vaultwarden), you'll get the Vaultwarden and the Bitwarden CLI as a `Dockerfile` and a `docker-compose.yml`. Follow the installation guide over there.
-
-### Enabling DNS and HTTPS with Let's Encrypt certs
-
-> 💡 **Tip**  
-> This configuration will not only support your BillCollector setup but also improves the user experience when accessing all your other locally running dockerized web services:**
-
-Vaultwarden only allows secure HTTPS access by default. Suppose you want to run an instance of Vaultwarden that can only be accessed from your local network by name instead of IP address and you want to use Let's Encrypt certificates.
-
-Currently, the simplest option is offered by [Duck DNS](https://www.duckdns.org) as a free Domain Name Service (DNS) in combination with the locally dockerized [Nginx Proxy Manager](https://nginxproxymanager.com).
-
-The cool thing about DuckDNS is not only that it is free of charge but also that it allows wildcard domains and local IP address names. For the latter, however, DNS rebind protection must also be configured in your router.
-
-The only downside of Duck DNS is that you cannot freely choose your domain name because it will follow the naming scheme [https://\<your subdomain\>.duckdns.org](duckdns.org).
-
-Steps to follow:
-
-1. If you don't already have an account, create one at <https://www.duckdns.org/>. Define a subdomain name either used as a wildcard domain (e.g., my-domain.duckdns.org) or just a single domain name.
-
-   ![MyDuckDNS](/doc/Screenshot%202025-02-27%20234458.jpg)
-
-2. Configure the DNS Rebind Protection in your router: For Fritz!Box routers go to `/Heimnetz/Netzwerk/Netzwerkeinstellungen/DNS-Rebind-Schutz` and enter the hostname you configured in Duck DNS.
-
-3. Check the setup of your domain name was successful.
-   On your Windows machine `<WIN>R cmd` and enter `nslookup <your subdomain\>.duckdns.org`. The response should look similar as follows:
-
-   ![nslookup](/doc/Screenshot%202025-02-28%20002726.jpg)
-
-   Alternatively, on your Linux machine use a tool like `dig` to check Duck DNS is resolving your domain name.
-
-4. Now we are ready to install NPM from the guide at the [Nginx Proxy Manager](https://nginxproxymanager.com).
-
-   a. After you've run your NPM container the first time, enter the web UI using the default credentials and change them to your private ones.
-
-   b. Go to `SSL Certificates`, Press `Add SSL Certificate` and choose `Let's Encrypt`.
-      - In the form fill in the field `Domain Names` either with wildcard like `*.my-domain.duckdns.org` and `my-domain.duckdns.org` or just a single domain like `my-vw.duckdns.org`.
-      - In the same form fill in the field `Email address for Let's Encrypt` you want Let's Encrypt to link the certificates in their database with.
-      - Enable the switch `Use DNS Challenge`, choose `DuckDNS` from the list and enter the token from step 1 into the text box by replacing `your-duckdns-token` in `dns_duckdns_token=your-duckdns-token`.
-      - You may leave `Propagation Seconds` blank or fill in a number of seconds to wait for DNS propagation before it fails.
-      - Enable the switch `I agree...` and press `Save`.
-      - Now it may take some seconds to finalize the Let's Encrypt DNS Challenge.
-      - When finished successfully, a new SSL certificate is configured with an expiry in some months which will be updated automatically by your NPM.
-
-   c. Go to `Hosts`, choose `Proxy Hosts`, and Press `Add Proxy Host`.
-      - In the form of tab `Details` fill in the domain name you want to access Vaultwarden locally, like `vault.my-domain.duckdns.org` (using your wildcard domain) or `my-vw.duckdns.org`.
-      - In the same form fill `Scheme` with `http`, `Forward Hostname/IP` with the IP address of your Vaultwarden Host (i.e., the IP of your Host running the docker in your local environment), and `Forward Port` with the port Vaultwarden is listening on (typically 80 for HTTP).
-      - In the form of tab `SSL` enter the SSL certificate name(s) configured in step b. and enable the switches `Force SSL` and `HTTP/2 Support`.
-      - Press `Save`.
-
-   d. Test the accessibility of your Vaultwarden Web UI in your browser by entering [https://vault.my-domain.duckdns.org](https://vault.my-domain.duckdns.org) or [https://my-vw.duckdns.org](https://my-vw.duckdns.org).
-
-### The BillCollector Installation and Docker Deployment
-
-Now that we have done a good job installing all the prerequisites, we are focusing on installing the BillCollector docker which is as simple as follows:
-
-1. Download this git repository to a folder in your local docker environment assuming a Linux bash terminal, e.g., `git clone <URL>/stefan/BillCollector.git`.
-
-2. [Configure BillCollector](#configuration) needs to be done. After each change in configuration proceed again with step 3.
-
-3. Open the installation script in your editor, e.g., `nano ./install_docker-image.sh`, adapt the link to your `Paperless ngx` instance's consumption folder (`ln -s </path/to/your/paperless/inbox>`).
-
-4. On your Linux console enter `./install_docker-image.sh` which creates a new docker image `billcollector:latest` and sets the soft link to the inbox of your `Paperless ngx` to let BillCollector collect bills periodically.
-
-5. Let your server's cron call your BillCollector periodically (e.g., bi-monthly) by calling `</path/to/your/billcollector-git-clone-folder/BillCollector.sh bc_default.ini`.
-
-## Configuration
-
-### Vaultwarden and Bitwarden
-
-First and once, for the basic configuration you need to adapt the `.env` file located in the `/apps` folder. Use the  `.env.example` as a template:
-
-- `cp .env.example .env`
-- define the .env-variables:
-  - `BW_API_URL=<local URL of the bw serve API, e.g. http://127.0.0.1:8087>`
-  - `VAULT_HOST` is deprecated and may be left empty. The vault itself may be
-    hosted by Bitwarden Cloud or Vaultwarden; only `BW_API_URL` must resolve to
-    a loopback, private, or container-network address.
-
-### Optional: Vscode and Debugging
-
-Use vscode when extending BillCollector - either the coded or, more likely, the collection of recipes.
-
-There is a installation script for local installation of the local environment. This will install Chrome for Testing, ChromeDriver, Python3, a Python virtual environment, and all required Python modules into the venv. It is tested under WSL2 and Ubuntu 20.04 LTS. Run the following command on your Linux command line:
-
-- `source install_local.sh`
-
-For debugging (in vscode) run `BillCollector.py` in debug mode (F5). The default debug settings are:
-
-- Use `bc_test.ini` as the default script of web services.
-- Before the action of the recipe is executed
-  - BillCollector saves the currently loaded web page into the file `page_source.html`
-  - BillCollector pauses and waits for SPACE to proceed. By this you are able to analyze the web page step by step to extract the required web elements.
-
-### Web Service Config
-
-The BillCollector configuration for each web service from which you want to retrieve documents consists of three parts:
-
-1. A Vaultwarden entry provides the login data for each of your private web service login:
-   - `Name`: name of the web service
-   - `User Name`: your secret login name to the web service
-   - `Password`: your secret password to the web service
-   - (optional and dependent on the web service) `TOTP`: key from your web service
-   - `URI 1`: the web service's web address where BillCollector should start from
-
-2. A list of service entries in `/apps/bc_default.ini` represents the script for collecting all bills:
-   - Enter line by line the name of the web service matching the `Name` of the service's entry in Vaultwarden (1).
-   - For web services where you have more than one login data for (e.g., family members having different accounts at the same mobile phone provider) you can enter the line in the following format: `<Name of web service> [<your name>, <additional name>]`.
-
-     *Example ini script:*
-
-     ```text
-     winSIM [Dieter, Auto, Will, Anna]
-     KabelDeutschland
-     Lichtblick [Strom, Gas]
-     ```
-
-3. A YAML recipe defines the browser automation, which typically starts at login and ends at the download of the wanted document from the web service portal:
-   - The recipes are placed in the subfolder `bc-recipes` and follow the naming convention `bc-recipe__<Name of web service>.yaml` where `Name of web service>` must equal `Name` of the web service in Vaultwarden.
-   - The basic concept of the BillCollector recipes is summarized as follows:
-      - YAML format
-      - One recipe per web portal identified by the yaml element `serviceName` and its filename `bc-recipe__<serviceName>`.
-      - Each recipe is structured in steps of actions.
-      - Each action step is led by an actionType defining a specific (selenium) web element action from `Click`, `ClickShadow`, `SendKeys`, `SwitchToFrame`, `SwitchToDefaultFrame`, `SwitchToParentFrame` and `Download`.
-      - Each action step is followed by parameters, namely (selenium) web element locators, variables, and specific controls.
-         - Locators are a single or multiple pairs of (selenium) selectors (`ID`, `CSS_SELECTOR`, `XPATH`, `LINK_TEXT`) and web elements to be located.
-           - 💡 SwitchToDefaultFrame and SwichtToParentFrame must not be followed by parameters.
-         - Variables are `{USERNAME}`, `{PASSWORD}` or `{OTP}` (all three from vaultwarden linked to the web service) or the key `ENTER`.
-         - Specific controls are `timeout` and `graceful`.
-      - There is a YAML schema named `bc-recipe-schema.yml` which includes the rules to be followed by the YAML recipes.
-
-> 💡 **Tip**  
-> When creating new recipes, make use of AI, e.g., let yourself be helped by Copilot - that speeds up creating the YAML recipe 🚀.
-> `BillCollectorRecipes.py` is used by `BillCollector` but also can be used as a separate command line tool for checking new YAML recipes:
-> `Usage: python3 BillCollectorRecipes.py <recipes.yaml> [<schema.yaml>]`.
->
-> Make use of the [Selenium IDE browser plugin](https://www.seleniumhq.org/selenium-ide). It lets you walk through your web portal to create a draft recipe.
-> Don’t forget to delete the cookies of that web portal to start with a clean session when training the web portal procedure for downloading your bills.
->
-> When `BillCollector.py` is run in debug mode, by default, it pauses at each step of the recipe, downloads the HTML into `page_source.html` and waits for a SPACE keystroke to proceed.
-> This lets you analyze the HTML for the web elements to be clicked or sent text (e.g., username) to.
-
-   *Full example of a YAML recipe, which also includes an One-Time-Password step (OTP):*
-
-   ```yaml
-   ---
-   services:
-   - serviceName: "datev"
-      actions:
-         - step: 1
-         description: "Click the login button to start the authentication process."
-         actionType: "Click"
-         parameters:
-            locators:
-               - locatorType: "CSS_SELECTOR"
-               element: "[data-test-id=\"login-button\"]"
-         - step: 2
-         description: "Click the TOTP login button to proceed with two-factor authentication."
-         actionType: "Click"
-         parameters:
-            locators:
-               - locatorType: "CSS_SELECTOR"
-               element: "[data-test-id=\"totp-login-button\"]"
-         - step: 3
-         description: "Focus on the username field for entering credentials."
-         actionType: "Click"
-         parameters:
-            locators:
-               - locatorType: "ID"
-               element: "username"
-         - step: 4
-         description: "Enter the username into the username input field."
-         actionType: "SendKeys"
-         parameters:
-            locators:
-               - locatorType: "ID"
-               element: "username"
-            variable: "{USERNAME}"
-         - step: 5
-         description: "Enter the password into the password input field."
-         actionType: "SendKeys"
-         parameters:
-            locators:
-               - locatorType: "ID"
-               element: "password"
-            variable: "{PASSWORD}"
-         - step: 6
-         description: "Click the login button to submit the entered credentials."
-         actionType: "Click"
-         parameters:
-            locators:
-               - locatorType: "ID"
-               element: "login"
-         - step: 7
-         description: "Enter the one-time password (OTP) into the verification field."
-         actionType: "SendKeys"
-         parameters:
-            locators:
-               - locatorType: "ID"
-               element: "enterverificationcode"
-            variable: "{OTP}"
-         - step: 8
-         description: "Press the Enter key to confirm the verification code."
-         actionType: "SendKeys"
-         parameters:
-            locators:
-               - locatorType: "ID"
-               element: "enterverificationcode"
-            variable: "ENTER"
-         - step: 9
-         description: "Click the button to load the documents in the dashboard."
-         actionType: "Click"
-         parameters:
-            locators:
-               - locatorType: "CSS_SELECTOR"
-               element: "[data-test-id=\"load-documents-button\"]"
-         - step: 10
-         description: "Select a specific checkbox to choose a document."
-         actionType: "Click"
-         parameters:
-            locators:
-               - locatorType: "ID"
-               element: "mat-mdc-checkbox-2-input"
-         - step: 11
-         description: "Download the selected document."
-         actionType: "Download"
-         parameters:
-            locators:
-               - locatorType: "CSS_SELECTOR"
-               element: "[data-test-id=\"download-button\"]"
-   ```
+BillCollector remains available under the [MIT License](LICENSE). The original
+project and copyright attribution are preserved.
