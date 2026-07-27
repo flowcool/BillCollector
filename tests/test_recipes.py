@@ -74,6 +74,8 @@ class RecipeValidationTests(unittest.TestCase):
             self, _listdir, wait_for_download):
         first = MagicMock()
         second = MagicMock()
+        first.get_attribute.return_value = "https://example.test/1.pdf"
+        second.get_attribute.return_value = "https://example.test/2.pdf"
         driver = MagicMock()
         driver.current_window_handle = "main"
         driver.current_url = "https://example.test/invoices"
@@ -90,8 +92,13 @@ class RecipeValidationTests(unittest.TestCase):
             downloaded = download_all_webelements(browser, element)
 
         self.assertEqual(downloaded, ["invoice-1.pdf", "invoice-2.pdf"])
-        first.click.assert_called_once_with()
-        second.click.assert_called_once_with()
+        driver.execute_script.assert_any_call(
+            "window.open(arguments[0], '_blank');",
+            "https://example.test/1.pdf")
+        driver.execute_script.assert_any_call(
+            "window.open(arguments[0], '_blank');",
+            "https://example.test/2.pdf")
+        self.assertEqual(driver.execute_script.call_count, 2)
         self.assertEqual(wait_for_download.call_count, 2)
 
     def test_action_failure_propagates(self):
