@@ -17,7 +17,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from BillCollectorRecipes import CheckRecipe
+from BillCollectorRecipes import CheckRecipe, CheckRecipeMetadata
 
 # Initialize browser and return driver object
 # parameterize browser: in debug mode = headless, default download folder, force download by always open pdf externally, ...
@@ -144,15 +144,22 @@ def retrieve_from_service(service, url, user, pwd, otp, debug):
     bcs = service_vars(usr=user, pwd=pwd, otp=otp, dbg=debug, dld=f"{os.path.dirname(os.path.realpath(__file__))}/Downloads")
     if not os.path.exists(bcs.dld):
         os.makedirs(bcs.dld)
+    sname = service.lower().replace(" ", "_")
+    recipe_dir = f"{os.path.dirname(os.path.realpath(__file__))}/bc-recipes"
+    bcs.yml = CheckRecipe(f"{recipe_dir}/bc-recipe__{sname}.yaml")
+    if bcs.yml is None:
+        raise RuntimeError(f"Recipe {sname} not found.")
+    CheckRecipeMetadata(
+        f"{recipe_dir}/bc-metadata__{sname}.yaml",
+        sname,
+        ACTION_MAP)
+
     bcs.drv = InitBrowser(bcs)
     bcs.drv.get(url)
 
     on_debug_save_web_page(bcs)
     on_debug_start_keyboard_listener(bcs)
     try:
-        sname = service.lower().replace(" ", "_")
-        bcs.yml = CheckRecipe(f"{os.path.dirname(os.path.realpath(__file__))}/bc-recipes/bc-recipe__{sname}.yaml")
-        if bcs.yml == None: raise Exception(f"Recipe {sname} not found.")
         file_downloaded = perform_actions(bcs)
         if file_downloaded:
             print(

@@ -145,7 +145,14 @@ runtime directory before starting BillCollector. See the supplied Compose
 example for the complete command.
 
 Recipe releases, compatibility metadata, update instructions, and rollback
-instructions live in the companion `billcollector-recipes` repository.
+instructions live in the companion
+[`billcollector-recipes`](https://github.com/flowcool/billcollector-recipes)
+repository.
+
+When `bc-metadata__<service>.yaml` is present, BillCollector checks its recipe
+format version and required engine actions before opening the provider portal.
+An incompatible recipe stops immediately with an explicit error. Recipes
+without metadata remain supported for compatibility with the original project.
 
 ## Configuration reference
 
