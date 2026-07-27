@@ -104,6 +104,9 @@ class DownloadStateTests(unittest.TestCase):
 
             self.assertIsNone(published)
             self.assertFalse(regenerated.exists())
+            account = next(iter(state.data["accounts"].values()))
+            self.assertEqual(len(account["urls"]), 1)
+            self.assertEqual(len(account["documents"]), 1)
 
     def test_corrupt_state_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp_dir:

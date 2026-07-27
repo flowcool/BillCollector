@@ -93,12 +93,15 @@ class DownloadState:
         url_hash = sha256_text(url)
         document_hash = sha256_text(source.name)
         content_hash = sha256_file(source)
-        if (
-                document_hash in account["documents"]
-                or content_hash in account["content"]):
+        if document_hash in account["documents"]:
+            source.unlink()
+            return None
+
+        if content_hash in account["content"]:
             source.unlink()
             if url_hash not in account["urls"]:
                 account["urls"].append(url_hash)
+            account["documents"].append(document_hash)
             self._save()
             return None
 

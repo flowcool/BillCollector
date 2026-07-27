@@ -467,7 +467,7 @@ def download_all_webelements(bcs, we):
                 if published is not None:
                     downloaded_files.append(published)
                 else:
-                    print(f"      Skipping duplicate content {index + 1}.")
+                    print(f"      Skipping known document {index + 1}.")
         else:
             downloaded_files.extend(new_files)
 
