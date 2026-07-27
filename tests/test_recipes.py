@@ -25,6 +25,7 @@ from BillCollectorServices import (  # noqa: E402
     perform_actions,
     perform__switch_to_default_frame,
     perform__switch_to_parent_frame,
+    wait_for_new_download,
     webElementObj,
 )
 
@@ -187,6 +188,26 @@ class RecipeValidationTests(unittest.TestCase):
             perform_actions(browser)
 
         self.assertNotIn(subscriber, output.getvalue())
+
+    @patch(
+        "BillCollectorServices.os.listdir",
+        side_effect=[
+            [],
+            [".org.chromium.temporary"],
+            [".org.chromium.temporary", "invoice.pdf.crdownload"],
+            ["invoice.pdf"],
+        ],
+    )
+    @patch("BillCollectorServices.time.sleep", return_value=None)
+    @patch(
+        "BillCollectorServices.time.monotonic",
+        side_effect=[0, 0.1, 0.2, 0.3, 0.4],
+    )
+    def test_wait_ignores_chrome_temporary_files(
+            self, _monotonic, _sleep, _listdir):
+        self.assertEqual(
+            wait_for_new_download("/downloads", set(), 10),
+            ["invoice.pdf"])
 
 
 if __name__ == "__main__":

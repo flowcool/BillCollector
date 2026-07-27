@@ -57,7 +57,8 @@ the URL of its private local API.
 - Container architecture: `linux/amd64`
 - Recipes: beta, because provider portals can change without notice
 - Scheduling: only after a recipe has passed repeated manual runs
-- Built-in download deduplication: not available yet
+- Persistent `DownloadAll` deduplication: available when state and output
+  directories are configured
 
 Use an immutable image tag, and preferably its digest, in production. Available
 tags are published in the repository's GitHub Container Registry.
@@ -79,7 +80,9 @@ The complete example is in
 Create the local directories:
 
 ```bash
-mkdir -p config recipes downloads
+mkdir -p config recipes downloads staging state
+sudo chown 1000:1000 state
+sudo chmod 2750 state
 ```
 
 Create `config/billcollector.ini`:
@@ -112,6 +115,13 @@ docker compose --profile tools run --rm --no-deps billcollector
 ```
 
 Inspect the logs and `./downloads` before enabling any scheduler.
+
+The example enables persistent deduplication. Downloads first land in temporary
+container staging, then unique documents are moved to `./downloads`. Persistent
+hashes are stored in `./state`; back it up and never run concurrent jobs
+against it. Exclude `./staging` from backups. After restoring `./state`, reapply
+owner/group `1000:1000` and mode `2750`. See
+[`docs/DEDUPLICATION.md`](docs/DEDUPLICATION.md).
 
 ## Installing recipes
 
