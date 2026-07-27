@@ -24,7 +24,8 @@
                     "Click",
                     "ClickShadow",
                     "SendKeys",
-                    "Download"
+                    "Download",
+                    "DownloadAll"
                   ]
                 },
                 "parameters": {
