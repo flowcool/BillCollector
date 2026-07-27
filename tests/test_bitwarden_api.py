@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
+
 
 APPS = Path(__file__).resolve().parents[1] / "apps"
 sys.path.insert(0, str(APPS))
@@ -11,6 +13,7 @@ sys.path.insert(0, str(APPS))
 from BillCollector import (  # noqa: E402
     get_item_by_name,
     get_json,
+    get_totp,
     is_api_url_local,
     post_json,
 )
@@ -109,6 +112,40 @@ class BitwardenApiUrlTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "found 0"):
             get_item_by_name(
                 "http://bitwarden-cli:8087", "Free Collonges")
+
+    @patch("BillCollector.requests.get")
+    def test_missing_totp_is_silent(self, request):
+        response = MagicMock(status_code=400)
+        request.return_value = response
+
+        self.assertIsNone(
+            get_totp("http://bitwarden-cli:8087", "item-id"))
+
+        response.raise_for_status.assert_not_called()
+
+    @patch("BillCollector.requests.get")
+    def test_totp_is_returned(self, request):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "success": True,
+            "data": {"data": "123456"},
+        }
+        request.return_value = response
+
+        self.assertEqual(
+            get_totp("http://bitwarden-cli:8087", "item-id"), "123456")
+        response.raise_for_status.assert_called_once_with()
+
+    @patch("BillCollector.requests.get")
+    def test_unexpected_totp_failure_is_not_hidden(self, request):
+        response = MagicMock(status_code=503)
+        error = requests.exceptions.HTTPError(response=response)
+        response.raise_for_status.side_effect = error
+        request.return_value = response
+
+        with self.assertRaisesRegex(
+                RuntimeError, r"Bitwarden TOTP request failed \(503\)"):
+            get_totp("http://bitwarden-cli:8087", "item-id")
 
 
 if __name__ == "__main__":

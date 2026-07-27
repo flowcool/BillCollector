@@ -173,6 +173,24 @@ def get_item_by_name(api, name):
             f"Expected one exact Bitwarden item match, found {len(matches)}")
     return matches[0]
 
+def get_totp(api, item_id):
+    """Return an item's TOTP, treating Bitwarden's 400 as 'not configured'."""
+    url = f"{api}/object/totp/{item_id}"
+    try:
+        response = requests.get(url, headers=bitwarden_api_headers())
+        if response.status_code == 400:
+            return None
+        response.raise_for_status()
+        return get_json_property_value(
+            json.dumps(response.json()), "data_data")
+    except requests.exceptions.RequestException as error:
+        status = (
+            error.response.status_code
+            if error.response is not None else "network"
+        )
+        raise RuntimeError(
+            f"Bitwarden TOTP request failed ({status})") from error
+
 class defs:
     def __init__(self, vault, api, fname="bc_default.ini", debug=False):
         self.vault = vault
@@ -226,9 +244,7 @@ def WebRetriDoc(self):
                 raise RuntimeError(
                     f"Bitwarden item {service_user} lacks login fields or URI")
 
-            item = get_json(f"{self.api}/object/totp/{item['id']}")
-            if item is not None: totp = get_json_property_value(item, "data_data") 
-            else: totp = None 
+            totp = get_totp(self.api, item["id"])
 
             # Download Documents
             if not retrieve_from_service(
