@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 APPS = Path(__file__).resolve().parents[1] / "apps"
 sys.path.insert(0, str(APPS))
 
-from BillCollector import get_json, is_api_url_local, post_json  # noqa: E402
+from BillCollector import (  # noqa: E402
+    get_item_by_name,
+    get_json,
+    is_api_url_local,
+    post_json,
+)
 
 
 def address_info(*addresses):
@@ -79,6 +84,31 @@ class BitwardenApiUrlTests(unittest.TestCase):
             json=None,
             headers={"Host": "127.0.0.1:8087"})
         response.raise_for_status.assert_called_once_with()
+
+    @patch("BillCollector.get_json")
+    def test_item_lookup_requires_one_exact_name(self, get):
+        get.return_value = (
+            '{"data":{"data":['
+            '{"id":"wanted","name":"Free Collonges"},'
+            '{"id":"other","name":"Free Collonges Archive"}'
+            ']}}'
+        )
+
+        item = get_item_by_name(
+            "http://bitwarden-cli:8087", "Free Collonges")
+
+        self.assertEqual(item["id"], "wanted")
+        get.assert_called_once_with(
+            "http://bitwarden-cli:8087/list/object/items"
+            "?search=Free%20Collonges")
+
+    @patch("BillCollector.get_json")
+    def test_item_lookup_rejects_missing_match(self, get):
+        get.return_value = '{"data":{"data":[]}}'
+
+        with self.assertRaisesRegex(RuntimeError, "found 0"):
+            get_item_by_name(
+                "http://bitwarden-cli:8087", "Free Collonges")
 
 
 if __name__ == "__main__":

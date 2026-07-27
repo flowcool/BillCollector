@@ -5,7 +5,7 @@ import os
 import sys
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from dotenv import load_dotenv
 import re
 from nslookup import Nslookup
@@ -122,13 +122,13 @@ def get_json(url):
         response.raise_for_status()  # Checks for Statuscode 200
         return response.text
     except requests.exceptions.RequestException as e:
-        print(f"Error with request: {e}")
+        status = e.response.status_code if e.response is not None else "network"
+        print(f"HTTP request failed ({status}).")
         return None
 
 # Check Bitwarden API status
 def bitwarden_api_check_status(url):
     content = get_json(f"{url}/status")
-    print(content)
     if content is None: return False, None
     if not is_json_property_value(content, "success", True): return False, None
     else: 
@@ -150,13 +150,28 @@ def post_json(url, payload):
         print("Successfully posted!")
         return json.dumps(response.json())
     except requests.exceptions.RequestException as e:
-        print(f"Error with request: {e}")
+        status = e.response.status_code if e.response is not None else "network"
+        print(f"HTTP request failed ({status}).")
         return False
 
 def get_json_property_value(content, prop):
     data = flatten(json.loads(content))
     result=data.get(prop)
     return result
+
+def get_item_by_name(api, name):
+    content = get_json(
+        f"{api}/list/object/items?search={quote(name, safe='')}")
+    if content is None:
+        raise RuntimeError("Bitwarden item search failed")
+
+    payload = json.loads(content)
+    items = payload.get("data", {}).get("data", [])
+    matches = [item for item in items if item.get("name") == name]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected one exact Bitwarden item match, found {len(matches)}")
+    return matches[0]
 
 class defs:
     def __init__(self, vault, api, fname="bc_default.ini", debug=False):
@@ -201,11 +216,17 @@ def WebRetriDoc(self):
             # Retrieve credentials
             ####TODO Intercept no data returned
             ####TODO Intercept doublettes in Bitwarden -> ID-Handling
-            item = get_json(f"{self.api}/object/item/{service_user}")
-            username = get_json_property_value(item, "data_login_username")
-            passsword = get_json_property_value(item, "data_login_password")
-            uri = get_json_property_value(item, "data_login_uris_0_uri")
-            item = get_json(f"{self.api}/object/totp/{service_user}")
+            item = get_item_by_name(self.api, service_user)
+            login = item.get("login") or {}
+            username = login.get("username")
+            passsword = login.get("password")
+            uris = login.get("uris") or []
+            uri = uris[0].get("uri") if uris else None
+            if not username or not passsword or not uri:
+                raise RuntimeError(
+                    f"Bitwarden item {service_user} lacks login fields or URI")
+
+            item = get_json(f"{self.api}/object/totp/{item['id']}")
             if item is not None: totp = get_json_property_value(item, "data_data") 
             else: totp = None 
 
