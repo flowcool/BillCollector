@@ -81,6 +81,30 @@ class DownloadStateTests(unittest.TestCase):
             self.assertTrue(
                 state.has_url("https://provider.test/invoice/new"))
 
+    def test_same_document_name_with_regenerated_content_is_not_published(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            first = downloads / "invoice-2026-07.pdf"
+            first.write_bytes(b"first generated representation")
+            state = DownloadState(root / "state", "account")
+            state.publish(
+                "https://provider.test/session-one",
+                first,
+                root / "output")
+            (root / "output" / first.name).unlink()
+            regenerated = downloads / first.name
+            regenerated.write_bytes(b"second generated representation")
+
+            published = state.publish(
+                "https://provider.test/session-two",
+                regenerated,
+                root / "output")
+
+            self.assertIsNone(published)
+            self.assertFalse(regenerated.exists())
+
     def test_corrupt_state_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             state_dir = Path(temp_dir)

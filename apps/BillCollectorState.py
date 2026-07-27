@@ -72,8 +72,13 @@ class DownloadState:
         return data
 
     def _account(self):
-        return self.data["accounts"].setdefault(
-            self.account_key, {"urls": [], "content": []})
+        account = self.data["accounts"].setdefault(
+            self.account_key,
+            {"urls": [], "documents": [], "content": []})
+        account.setdefault("urls", [])
+        account.setdefault("documents", [])
+        account.setdefault("content", [])
+        return account
 
     def has_url(self, url):
         return sha256_text(url) in self._account()["urls"]
@@ -86,8 +91,11 @@ class DownloadState:
 
         account = self._account()
         url_hash = sha256_text(url)
+        document_hash = sha256_text(source.name)
         content_hash = sha256_file(source)
-        if content_hash in account["content"]:
+        if (
+                document_hash in account["documents"]
+                or content_hash in account["content"]):
             source.unlink()
             if url_hash not in account["urls"]:
                 account["urls"].append(url_hash)
@@ -103,6 +111,7 @@ class DownloadState:
         shutil.move(str(source), str(destination))
 
         account["urls"].append(url_hash)
+        account["documents"].append(document_hash)
         account["content"].append(content_hash)
         self._save()
         return destination.name

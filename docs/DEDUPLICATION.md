@@ -23,8 +23,9 @@ provider portal
 ```
 
 The state contains SHA-256 hashes of the Bitwarden item ID, successfully
-processed document URLs, and successfully published file contents. It does not
-store raw account IDs, URLs, credentials, filenames, or invoice contents.
+processed document URLs, final document filenames, and successfully published
+file contents. It does not store raw account IDs, URLs, credentials, filenames,
+or invoice contents.
 
 ## Enabling it
 
@@ -57,9 +58,10 @@ For every `DownloadAll` link:
 2. skip it if that URL was published previously for the same Bitwarden item;
 3. otherwise download into temporary staging;
 4. hash the completed file;
-5. delete it if the same content was already published under another URL;
-6. otherwise move it into the output directory;
-7. atomically replace the JSON state file.
+5. hash its final filename as the provider document identity;
+6. delete it if the same document identity or content was already published;
+7. otherwise move it into the output directory;
+8. atomically replace the JSON state file.
 
 The state uses the Bitwarden item ID rather than its name, so renaming an item
 does not reset its history.
@@ -98,6 +100,12 @@ and flushes the state directory.
 Persistent deduplication currently applies to `DownloadAll`, including the
 validated Freebox recipe. The legacy `Download` action keeps its previous
 behavior until it has a reliable pre-download document identity.
+
+Free regenerates invoice URLs and PDF bytes between sessions while keeping a
+stable final invoice filename. Filename identity is therefore authoritative for
+that provider. If a provider reuses the same filename for a corrected document,
+BillCollector treats it as the same invoice; operators must deliberately reset
+that account's state to ingest the replacement.
 
 A filename collision in the output directory aborts the current run. Documents
 published before the collision are already recorded, so a later run resumes

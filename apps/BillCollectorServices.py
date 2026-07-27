@@ -491,7 +491,8 @@ def wait_for_new_download(download_dir, previous_files, timeout):
         current_files = set(os.listdir(download_dir))
         new_files = current_files - previous_files
         incomplete = {
-            name for name in new_files if name.endswith(".crdownload")}
+            name for name in new_files
+            if name.endswith(".crdownload") or name.startswith(".")}
         completed = sorted(new_files - incomplete)
         if completed and not incomplete:
             return completed
