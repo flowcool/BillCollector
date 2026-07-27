@@ -15,8 +15,11 @@ sys.path.insert(0, str(APPS))
 from BillCollectorRecipes import CheckRecipe, is_yaml_file  # noqa: E402
 from BillCollectorServices import (  # noqa: E402
     ACTION_MAP,
+    download_all_webelements,
+    perform_actions,
     perform__switch_to_default_frame,
     perform__switch_to_parent_frame,
+    webElementObj,
 )
 
 
@@ -59,6 +62,56 @@ class RecipeValidationTests(unittest.TestCase):
 
         browser.drv.switch_to.parent_frame.assert_called_once_with()
         browser.drv.switch_to.default_content.assert_called_once_with()
+
+    @patch(
+        "BillCollectorServices.wait_for_new_download",
+        side_effect=[["invoice-1.pdf"], ["invoice-2.pdf"]],
+    )
+    @patch("BillCollectorServices.os.listdir", return_value=[])
+    def test_download_all_clicks_every_matching_element(
+            self, _listdir, wait_for_download):
+        first = MagicMock()
+        second = MagicMock()
+        driver = MagicMock()
+        driver.current_window_handle = "main"
+        driver.current_url = "https://example.test/invoices"
+        driver.window_handles = ["main"]
+        driver.find_elements.return_value = [first, second]
+        browser = SimpleNamespace(drv=driver, dld="/downloads")
+        element = webElementObj(timeout=10)
+        element.selectors = [
+            webElementObj.selectorObj("css selector", "a.invoice")
+        ]
+
+        with patch("BillCollectorServices.WebDriverWait") as wait:
+            wait.return_value.until.return_value = [first, second]
+            downloaded = download_all_webelements(browser, element)
+
+        self.assertEqual(downloaded, ["invoice-1.pdf", "invoice-2.pdf"])
+        first.click.assert_called_once_with()
+        second.click.assert_called_once_with()
+        self.assertEqual(wait_for_download.call_count, 2)
+
+    def test_action_failure_propagates(self):
+        browser = SimpleNamespace(
+            usr="subscriber",
+            yml={
+                "services": [{
+                    "serviceName": "free",
+                    "actions": [{
+                        "step": 1,
+                        "actionType": "Click",
+                        "parameters": {},
+                    }],
+                }]
+            },
+        )
+
+        with patch(
+                "BillCollectorServices.perform__click",
+                side_effect=RuntimeError("login failed")):
+            with self.assertRaisesRegex(RuntimeError, "login failed"):
+                perform_actions(browser)
 
 
 if __name__ == "__main__":

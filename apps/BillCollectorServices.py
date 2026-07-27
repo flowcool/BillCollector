@@ -126,7 +126,8 @@ ACTION_MAP = {
     "Click": "perform__click",
     "ClickShadow": "perform__click_shadow",
     "SendKeys": "perform__send_keys",
-    "Download": "perform__download"
+    "Download": "perform__download",
+    "DownloadAll": "perform__download_all"
 }
 
 # Map yaml variables to function variables
@@ -158,6 +159,7 @@ def retrieve_from_service(service, url, user, pwd, otp, debug):
     except Exception as e:
         print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
         print(f"Service {service} for {bcs.usr} not successfully finished.")
+        bcs.drv.quit()
         on_debug_stop_keyboard_listener(bcs)
         return False
     else:
@@ -168,36 +170,37 @@ def retrieve_from_service(service, url, user, pwd, otp, debug):
 # Perform actions from YAML recipe on web elements - helper function for dispatching actions
 def perform_actions(bcs):
     file_downloaded = []
-    try:
-        # Parse the YAML structure
-        services = bcs.yml.get('services', [])
-        
-        for service in services:
-                service_name = service.get('serviceName')
-                print(f"Processing Service: {service_name} for {bcs.usr}.")
-                
-                actions = service.get('actions', [])
-                for action in sorted(actions, key=lambda x: x.get('step', 0)):  # Sort by step number
-                    step = action['step']
-                    description = action.get('description', "No description provided.") # optional
-                    action_type = action['actionType']
-                    parameters = action.get('parameters', {})
-                   
-                    print(f"  Executing Step {step}: {action_type}")
-                    print(f"   {description}")
-                    perform_action_name = ACTION_MAP.get(action_type)
-                    if perform_action_name is None:
-                        raise Exception(f"Unsupported action type: {action_type}")
-                    perform_action = globals().get(perform_action_name) # Get function by name
-                    if not callable(perform_action):
-                        raise Exception(f"Function {perform_action_name} is not callable or not found")
-                    download = perform_action(bcs, parameters)
-                    if download != None:
-                        file_downloaded.append(download)
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
-    else:
-        return file_downloaded
+    services = bcs.yml.get('services', [])
+
+    for service in services:
+        service_name = service.get('serviceName')
+        print(f"Processing Service: {service_name} for {bcs.usr}.")
+
+        actions = service.get('actions', [])
+        for action in sorted(actions, key=lambda x: x.get('step', 0)):
+            step = action['step']
+            description = action.get(
+                'description', "No description provided.")
+            action_type = action['actionType']
+            parameters = action.get('parameters', {})
+
+            print(f"  Executing Step {step}: {action_type}")
+            print(f"   {description}")
+            perform_action_name = ACTION_MAP.get(action_type)
+            if perform_action_name is None:
+                raise RuntimeError(
+                    f"Unsupported action type: {action_type}")
+            perform_action = globals().get(perform_action_name)
+            if not callable(perform_action):
+                raise RuntimeError(
+                    f"Function {perform_action_name} is not callable or not found")
+            download = perform_action(bcs, parameters)
+            if isinstance(download, list):
+                file_downloaded.extend(download)
+            elif download is not None:
+                file_downloaded.append(download)
+
+    return file_downloaded
 
 # Get Selenium locator or None (for Actions with no locator)
 def get_selenium_locator(locator_type):
@@ -207,87 +210,69 @@ def get_selenium_locator(locator_type):
 
 # Initialize web element object
 def init_webelement_obj(parameters, expected_locators=1):
-    try:
-        webElement = webElementObj(
-            timeout = parameters.get('timeout', 10), 
-            variable = parameters.get('variable', None), 
-            graceful = parameters.get('graceful', False))
-        webElement.selectors = []
-        if expected_locators > 0:
-            locators = parameters.get('locators', [])
-            if len(locators) != expected_locators:
-                raise Exception(f"Expected {expected_locators} locators, but got {len(locators)}")
-            for locator in locators:
-                seleniumLocator = get_selenium_locator(locator.get('locatorType'))
-                element = locator.get('element')
-                if seleniumLocator and element:
-                    selector = webElementObj.selectorObj(seleniumLocator, element)
-                    webElement.selectors.append(selector)
-                else:
-                    raise Exception(f"Missing locatorType or element in {locator}")
-                print(f"      Locator: {seleniumLocator}, Element: {element}")    
-        return webElement
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
-        return None
+    webElement = webElementObj(
+        timeout=parameters.get('timeout', 10),
+        variable=parameters.get('variable', None),
+        graceful=parameters.get('graceful', False))
+    webElement.selectors = []
+    if expected_locators > 0:
+        locators = parameters.get('locators', [])
+        if len(locators) != expected_locators:
+            raise ValueError(
+                f"Expected {expected_locators} locators, but got {len(locators)}")
+        for locator in locators:
+            seleniumLocator = get_selenium_locator(
+                locator.get('locatorType'))
+            element = locator.get('element')
+            if seleniumLocator and element:
+                selector = webElementObj.selectorObj(
+                    seleniumLocator, element)
+                webElement.selectors.append(selector)
+            else:
+                raise ValueError(
+                    f"Missing locatorType or element in {locator}")
+            print(f"      Locator: {seleniumLocator}, Element: {element}")
+    return webElement
 
 # Perform single action (wrappers)
 #
 def perform__switch_to_parent_frame(bcs, parameters):
-    try:
-        webElement = init_webelement_obj(parameters or {}, 0)
-        switch_to_parent_frame_webelement(bcs, webElement)
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
+    webElement = init_webelement_obj(parameters or {}, 0)
+    switch_to_parent_frame_webelement(bcs, webElement)
 
 def perform__switch_to_default_frame(bcs, parameters):
-    try:
-        webElement = init_webelement_obj(parameters or {}, 0)
-        switch_to_default_frame_webelement(bcs, webElement)
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
+    webElement = init_webelement_obj(parameters or {}, 0)
+    switch_to_default_frame_webelement(bcs, webElement)
 
 def perform__switch_to_frame(bcs, parameters):
-    try:
-        webElement = init_webelement_obj(parameters)
-        switch_to_frame_webelement(bcs, webElement)
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
+    webElement = init_webelement_obj(parameters)
+    switch_to_frame_webelement(bcs, webElement)
 
 
 def perform__click(bcs, parameters):
-    try:
-        webElement = init_webelement_obj(parameters)
-        click_webelement(bcs, webElement)
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
+    webElement = init_webelement_obj(parameters)
+    click_webelement(bcs, webElement)
 
 def perform__click_shadow(bcs, parameters):
-    try:
-        webElement = init_webelement_obj(parameters, 3)
-        clickshadow_webelement(bcs, webElement)
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
+    webElement = init_webelement_obj(parameters, 3)
+    clickshadow_webelement(bcs, webElement)
 
 
 def perform__send_keys(bcs, parameters):
-    try:
-        webElement = init_webelement_obj(parameters)
-        if webElement.variable in VARIABLE_MAP:
-            webElement.keys = VARIABLE_MAP[webElement.variable](bcs)
-        else:
-            raise Exception(f"Unknown variable: {webElement.variable}")
-        sendkeys_webelement(bcs, webElement)
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}: {e}")
+    webElement = init_webelement_obj(parameters)
+    if webElement.variable in VARIABLE_MAP:
+        webElement.keys = VARIABLE_MAP[webElement.variable](bcs)
+    else:
+        raise ValueError(f"Unknown variable: {webElement.variable}")
+    sendkeys_webelement(bcs, webElement)
 
 def perform__download(bcs, parameters):
-    try:
-        webElement = init_webelement_obj(parameters, 1)
-        file_downloaded = download_webelement(bcs, webElement)
-        return file_downloaded
-    except Exception as e:
-        print(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
+    webElement = init_webelement_obj(parameters, 1)
+    return download_webelement(bcs, webElement)
+
+def perform__download_all(bcs, parameters):
+    webElement = init_webelement_obj(parameters, 1)
+    return download_all_webelements(bcs, webElement)
 
 # Apply action to web element
 #
@@ -404,6 +389,59 @@ def download_webelement(bcs, we):
     click_webelement(bcs,we)
     time.sleep(5)
     return is_download_finished(bcs.dld, prev_file)
+
+def download_all_webelements(bcs, we):
+    selector = we.selectors[0]
+    elements = WebDriverWait(bcs.drv, we.timeout).until(
+        EC.presence_of_all_elements_located((selector.locator, selector.element)))
+    download_count = len(elements)
+    if download_count == 0:
+        if we.graceful:
+            return []
+        raise RuntimeError("No download elements found")
+
+    downloaded_files = []
+    original_window = bcs.drv.current_window_handle
+    listing_url = bcs.drv.current_url
+
+    for index in range(download_count):
+        elements = bcs.drv.find_elements(selector.locator, selector.element)
+        if index >= len(elements):
+            raise RuntimeError(
+                f"Download list changed after {index} of {download_count} files")
+
+        previous_files = set(os.listdir(bcs.dld))
+        windows_before = set(bcs.drv.window_handles)
+        elements[index].click()
+        downloaded_files.extend(
+            wait_for_new_download(bcs.dld, previous_files, we.timeout))
+
+        new_windows = set(bcs.drv.window_handles) - windows_before
+        for window in new_windows:
+            bcs.drv.switch_to.window(window)
+            bcs.drv.close()
+        bcs.drv.switch_to.window(original_window)
+
+        if bcs.drv.current_url != listing_url:
+            bcs.drv.back()
+            WebDriverWait(bcs.drv, we.timeout).until(
+                EC.presence_of_all_elements_located(
+                    (selector.locator, selector.element)))
+
+    return downloaded_files
+
+def wait_for_new_download(download_dir, previous_files, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current_files = set(os.listdir(download_dir))
+        new_files = current_files - previous_files
+        incomplete = {
+            name for name in new_files if name.endswith(".crdownload")}
+        completed = sorted(new_files - incomplete)
+        if completed and not incomplete:
+            return completed
+        time.sleep(0.2)
+    raise RuntimeError("Download did not finish before timeout")
     
 def latest_download_file(download_dir):
       os.chdir(download_dir)

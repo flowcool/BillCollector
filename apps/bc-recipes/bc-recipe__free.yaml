@@ -1,0 +1,43 @@
+---
+services:
+  - serviceName: "free"
+    actions:
+      - step: 1
+        description: "Enter the Freebox subscriber identifier."
+        actionType: "SendKeys"
+        parameters:
+          locators:
+            - locatorType: "ID"
+              element: "login_b"
+          variable: "{USERNAME}"
+      - step: 2
+        description: "Enter the Freebox subscriber password."
+        actionType: "SendKeys"
+        parameters:
+          locators:
+            - locatorType: "ID"
+              element: "pass_b"
+          variable: "{PASSWORD}"
+      - step: 3
+        description: "Submit the Freebox login form."
+        actionType: "Click"
+        parameters:
+          locators:
+            - locatorType: "ID"
+              element: "ok"
+      - step: 4
+        description: "Open the complete Freebox invoice history."
+        actionType: "Click"
+        parameters:
+          locators:
+            - locatorType: "XPATH"
+              element: "//a[contains(@href, 'facture_liste.pl') and @title='Voir toutes mes factures']"
+          timeout: 30
+      - step: 5
+        description: "Download every PDF invoice in the Freebox history."
+        actionType: "DownloadAll"
+        parameters:
+          locators:
+            - locatorType: "XPATH"
+              element: "//a[contains(@href, 'facture_pdf.pl') and contains(@class, 'btn_download') and @title='Télécharger votre facture en PDF']"
+          timeout: 30
