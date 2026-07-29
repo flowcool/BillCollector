@@ -113,7 +113,8 @@ class DownloadState:
                 f"Output file already exists: {destination.name}")
         shutil.move(str(source), str(destination))
 
-        account["urls"].append(url_hash)
+        if url_hash not in account["urls"]:
+            account["urls"].append(url_hash)
         account["documents"].append(document_hash)
         account["content"].append(content_hash)
         self._save()

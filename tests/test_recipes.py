@@ -22,6 +22,7 @@ from BillCollectorRecipes import (  # noqa: E402
 from BillCollectorServices import (  # noqa: E402
     ACTION_MAP,
     download_all_webelements,
+    download_webelement,
     perform_actions,
     perform__switch_to_default_frame,
     perform__switch_to_parent_frame,
@@ -154,6 +155,75 @@ class RecipeValidationTests(unittest.TestCase):
             "https://example.test/2.pdf")
         self.assertEqual(driver.execute_script.call_count, 2)
         self.assertEqual(wait_for_download.call_count, 2)
+
+    @patch(
+        "BillCollectorServices.wait_for_new_download",
+        return_value=["invoice.pdf"],
+    )
+    @patch("BillCollectorServices.os.listdir", return_value=[])
+    @patch("BillCollectorServices.click_webelement")
+    def test_single_download_publishes_through_persistent_state(
+            self, click, _listdir, wait_for_download):
+        state = MagicMock()
+        state.publish.return_value = "invoice.pdf"
+        link = MagicMock()
+        link.get_attribute.return_value = "https://example.test/invoice.pdf"
+        driver = MagicMock()
+        driver.find_element.return_value = link
+        browser = SimpleNamespace(
+            drv=driver,
+            dld="/downloads",
+            state=state,
+            output_dir="/output",
+        )
+        element = webElementObj(timeout=10)
+        element.selectors = [
+            webElementObj.selectorObj("css selector", "a.invoice")
+        ]
+
+        downloaded = download_webelement(browser, element)
+
+        self.assertEqual(downloaded, "invoice.pdf")
+        click.assert_called_once_with(browser, element)
+        wait_for_download.assert_called_once_with("/downloads", set(), 10)
+        state.publish.assert_called_once_with(
+            "https://example.test/invoice.pdf",
+            "/downloads/invoice.pdf",
+            "/output",
+        )
+
+    @patch(
+        "BillCollectorServices.wait_for_new_download",
+        return_value=["invoice.pdf"],
+    )
+    @patch("BillCollectorServices.os.listdir", return_value=[])
+    @patch("BillCollectorServices.click_webelement")
+    def test_single_download_skips_known_document_after_download(
+            self, _click, _listdir, _wait_for_download):
+        state = MagicMock()
+        state.publish.return_value = None
+        link = MagicMock()
+        link.get_attribute.return_value = None
+        driver = MagicMock()
+        driver.current_url = "https://example.test/invoices"
+        driver.find_element.return_value = link
+        browser = SimpleNamespace(
+            drv=driver,
+            dld="/downloads",
+            state=state,
+            output_dir="/output",
+        )
+        element = webElementObj(timeout=10)
+        element.selectors = [
+            webElementObj.selectorObj("css selector", "button.download")
+        ]
+
+        self.assertIsNone(download_webelement(browser, element))
+        state.publish.assert_called_once_with(
+            "https://example.test/invoices",
+            "/downloads/invoice.pdf",
+            "/output",
+        )
 
     def test_action_failure_propagates(self):
         browser = SimpleNamespace(
