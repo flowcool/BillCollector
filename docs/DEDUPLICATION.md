@@ -1,7 +1,7 @@
 # Persistent download deduplication
 
 BillCollector can keep a persistent, privacy-preserving history for
-`DownloadAll` recipes.
+recipes using either `DownloadAll` or the legacy `Download` action.
 
 ## Data flow
 
@@ -62,6 +62,11 @@ For every `DownloadAll` link:
 6. delete it if the same document identity or content was already published;
 7. otherwise move it into the output directory;
 8. atomically replace the JSON state file.
+
+For `Download`, BillCollector cannot safely pre-filter on the URL because
+button-based recipes may expose only the current page URL. It first downloads
+the candidate into staging, then follows steps 4–8 using the final filename and
+content as the authoritative duplicate checks.
 
 The state uses the Bitwarden item ID rather than its name, so renaming an item
 does not reset its history.
