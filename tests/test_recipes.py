@@ -26,6 +26,7 @@ from BillCollectorServices import (  # noqa: E402
     download_all_webelements,
     download_webelement,
     perform_actions,
+    perform__navigate,
     perform__switch_to_default_frame,
     perform__switch_to_parent_frame,
     wait_for_new_download,
@@ -217,6 +218,23 @@ class RecipeValidationTests(unittest.TestCase):
 
         browser.drv.switch_to.parent_frame.assert_called_once_with()
         browser.drv.switch_to.default_content.assert_called_once_with()
+
+    def test_navigate_opens_an_absolute_https_url(self):
+        browser = SimpleNamespace(drv=MagicMock())
+
+        perform__navigate(
+            browser,
+            {"url": "https://example.test/invoices"},
+        )
+
+        browser.drv.get.assert_called_once_with(
+            "https://example.test/invoices")
+
+    def test_navigate_rejects_non_https_urls(self):
+        browser = SimpleNamespace(drv=MagicMock())
+
+        with self.assertRaisesRegex(ValueError, "absolute HTTPS URL"):
+            perform__navigate(browser, {"url": "http://example.test"})
 
     def test_click_until_absent_succeeds_when_control_is_initially_absent(self):
         driver = PaginationDriver(remaining_pages=0)
