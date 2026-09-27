@@ -22,6 +22,7 @@
                     "SwitchToDefaultFrame",
                     "SwitchToFrame",
                     "Click",
+                    "ClickUntilAbsent",
                     "ClickShadow",
                     "SendKeys",
                     "Download",
@@ -50,6 +51,11 @@
                       "enum": ["{USERNAME}", "{PASSWORD}", "{OTP}", "ENTER"]
                     },
                     "timeout": { "type": "integer" },
+                    "maxClicks": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    },
                     "graceful": { "type": "boolean" }
                   }
                 }
@@ -62,7 +68,29 @@
               },
               "else": {
                 "required": ["step", "actionType", "parameters"]
-              }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "actionType": { "const": "ClickUntilAbsent" }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "parameters": {
+                        "required": ["locators"],
+                        "properties": {
+                          "locators": {
+                            "minItems": 2,
+                            "maxItems": 2
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         },

@@ -249,6 +249,7 @@ python3 apps/BillCollectorRecipes.py \
 Supported actions currently include:
 
 - `Click`
+- `ClickUntilAbsent` (bounded pagination with a progress locator)
 - `ClickShadow`
 - `SendKeys`
 - `SwitchToFrame`
