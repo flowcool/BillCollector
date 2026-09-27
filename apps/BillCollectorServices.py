@@ -564,21 +564,23 @@ def download_all_webelements(bcs, we):
         previous_files = set(os.listdir(bcs.dld))
         windows_before = set(bcs.drv.window_handles)
         download_url = elements[index].get_attribute("href")
-        if not download_url:
-            raise RuntimeError(
-                f"Download element {index + 1} has no URL")
         state = getattr(bcs, "state", None)
-        if state and state.has_url(download_url):
+        if download_url and state and state.has_url(download_url):
             print(f"      Skipping known document {index + 1}.")
             continue
-        bcs.drv.execute_script(
-            "window.open(arguments[0], '_blank');", download_url)
+        if download_url:
+            bcs.drv.execute_script(
+                "window.open(arguments[0], '_blank');", download_url)
+        else:
+            elements[index].click()
         new_files = wait_for_new_download(
             bcs.dld, previous_files, we.timeout)
         if state:
+            document_url = download_url or (
+                f"{listing_url}#clickable-download-{index + 1}")
             for filename in new_files:
                 published = state.publish(
-                    download_url,
+                    document_url,
                     os.path.join(bcs.dld, filename),
                     bcs.output_dir)
                 if published is not None:
