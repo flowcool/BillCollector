@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import yaml
+from selenium.common.exceptions import TimeoutException
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,7 @@ from BillCollectorRecipes import (  # noqa: E402
 )
 from BillCollectorServices import (  # noqa: E402
     ACTION_MAP,
+    click_until_absent_webelement,
     download_all_webelements,
     download_webelement,
     perform_actions,
@@ -31,7 +33,84 @@ from BillCollectorServices import (  # noqa: E402
 )
 
 
+class PaginationElement:
+    def __init__(self, driver):
+        self.driver = driver
+
+    def is_displayed(self):
+        return True
+
+    def is_enabled(self):
+        return self.driver.enabled
+
+    def click(self):
+        self.driver.clicks += 1
+        if not self.driver.stalled:
+            self.driver.remaining_pages -= 1
+            self.driver.loaded_items += 1
+
+
+class PaginationResultElement:
+    def __init__(self, displayed=True):
+        self.displayed = displayed
+
+    def is_displayed(self):
+        return self.displayed
+
+
+class PaginationDriver:
+    def __init__(
+            self, remaining_pages, stalled=False, enabled=True,
+            total_items=None):
+        self.remaining_pages = remaining_pages
+        self.stalled = stalled
+        self.enabled = enabled
+        self.loaded_items = 1
+        self.total_items = total_items
+        self.clicks = 0
+        self.scrolled_elements = []
+        self.button = PaginationElement(self)
+
+    def execute_script(self, script, element):
+        self.assert_scroll_script(script)
+        self.scrolled_elements.append(element)
+
+    @staticmethod
+    def assert_scroll_script(script):
+        expected = ("scrollIntoView", "behavior: 'instant'", "block: 'center'")
+        if any(fragment not in script for fragment in expected):
+            raise AssertionError(f"Unexpected script: {script}")
+
+    def find_elements(self, _locator, element):
+        if element == "button.load-more":
+            return [self.button] if self.remaining_pages > 0 else []
+        if element == "a.invoice":
+            visible = [PaginationResultElement()] * self.loaded_items
+            hidden_count = max(
+                0, (self.total_items or self.loaded_items) - self.loaded_items)
+            return visible + [PaginationResultElement(False)] * hidden_count
+        raise AssertionError(f"Unexpected selector: {element}")
+
+
 class RecipeValidationTests(unittest.TestCase):
+    def pagination_element(self, driver, max_clicks=20):
+        element = webElementObj(timeout=1, max_clicks=max_clicks)
+        element.selectors = [
+            webElementObj.selectorObj("css selector", "button.load-more"),
+            webElementObj.selectorObj("css selector", "a.invoice"),
+        ]
+        return SimpleNamespace(drv=driver, dbg=False), element
+
+    @staticmethod
+    def immediate_wait(wait):
+        def until(predicate):
+            result = predicate(wait.call_args.args[0])
+            if result:
+                return result
+            raise TimeoutException()
+
+        wait.return_value.until.side_effect = until
+
     def test_all_bundled_recipes_match_the_schema(self):
         recipes = sorted((APPS / "bc-recipes").glob("bc-recipe__*.yaml"))
         self.assertTrue(recipes, "No bundled recipes were found")
@@ -110,6 +189,25 @@ class RecipeValidationTests(unittest.TestCase):
         self.assertFalse(valid)
         self.assertIsNone(parsed)
 
+    def test_click_until_absent_schema_requires_two_locators(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            recipe = Path(temp_dir) / "invalid-pagination.yaml"
+            recipe.write_text(
+                "services:\n"
+                "  - serviceName: test\n"
+                "    actions:\n"
+                "      - step: 1\n"
+                "        actionType: ClickUntilAbsent\n"
+                "        parameters:\n"
+                "          locators:\n"
+                "            - locatorType: ID\n"
+                "              element: load-more\n",
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                self.assertIsNone(CheckRecipe(recipe))
+
     @patch("BillCollectorServices.time.sleep", return_value=None)
     def test_parameterless_frame_switch_actions(self, _sleep):
         browser = SimpleNamespace(dbg=False, drv=MagicMock())
@@ -119,6 +217,53 @@ class RecipeValidationTests(unittest.TestCase):
 
         browser.drv.switch_to.parent_frame.assert_called_once_with()
         browser.drv.switch_to.default_content.assert_called_once_with()
+
+    def test_click_until_absent_succeeds_when_control_is_initially_absent(self):
+        driver = PaginationDriver(remaining_pages=0)
+        browser, element = self.pagination_element(driver)
+
+        self.assertTrue(click_until_absent_webelement(browser, element))
+        self.assertEqual(driver.clicks, 0)
+
+    @patch("BillCollectorServices.WebDriverWait")
+    def test_click_until_absent_loads_pages_until_control_disappears(self, wait):
+        driver = PaginationDriver(remaining_pages=2, total_items=3)
+        browser, element = self.pagination_element(driver)
+        self.immediate_wait(wait)
+
+        self.assertTrue(click_until_absent_webelement(browser, element))
+        self.assertEqual(driver.clicks, 2)
+        self.assertEqual(driver.loaded_items, 3)
+        self.assertEqual(driver.scrolled_elements, [driver.button] * 2)
+
+    @patch("BillCollectorServices.WebDriverWait")
+    def test_click_until_absent_rejects_stalled_progress(self, wait):
+        driver = PaginationDriver(remaining_pages=1, stalled=True)
+        browser, element = self.pagination_element(driver)
+        self.immediate_wait(wait)
+
+        with self.assertRaisesRegex(
+                RuntimeError, "did not load additional elements"):
+            click_until_absent_webelement(browser, element)
+
+    @patch("BillCollectorServices.WebDriverWait")
+    def test_click_until_absent_does_not_treat_disabled_as_absent(self, wait):
+        driver = PaginationDriver(remaining_pages=1, enabled=False)
+        browser, element = self.pagination_element(driver)
+        self.immediate_wait(wait)
+
+        with self.assertRaisesRegex(RuntimeError, "did not become actionable"):
+            click_until_absent_webelement(browser, element)
+        self.assertEqual(driver.clicks, 0)
+
+    @patch("BillCollectorServices.WebDriverWait")
+    def test_click_until_absent_rejects_exhausted_click_limit(self, wait):
+        driver = PaginationDriver(remaining_pages=2)
+        browser, element = self.pagination_element(driver, max_clicks=1)
+        self.immediate_wait(wait)
+
+        with self.assertRaisesRegex(RuntimeError, "after 1 clicks"):
+            click_until_absent_webelement(browser, element)
 
     @patch(
         "BillCollectorServices.wait_for_new_download",

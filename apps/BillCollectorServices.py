@@ -13,7 +13,11 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    StaleElementReferenceException,
+    TimeoutException,
+)
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -109,11 +113,14 @@ class webElementObj:
         def __init__(self, locator, element):
             self.locator = locator
             self.element = element
-    def __init__(self, timeout=10, variable=None, graceful=False, keys=None):
+    def __init__(
+            self, timeout=10, variable=None, graceful=False, keys=None,
+            max_clicks=20):
         self.timeout = timeout
         self.graceful = graceful
         self.variable = variable
         self.keys = keys
+        self.max_clicks = max_clicks
 
 # Map yaml recipe locator types to Selenium locator types
 LOCATOR_MAP = {
@@ -129,6 +136,7 @@ ACTION_MAP = {
     "SwitchToDefaultFrame": "perform__switch_to_default_frame",
     "SwitchToFrame": "perform__switch_to_frame",
     "Click": "perform__click",
+    "ClickUntilAbsent": "perform__click_until_absent",
     "ClickShadow": "perform__click_shadow",
     "SendKeys": "perform__send_keys",
     "Download": "perform__download",
@@ -247,7 +255,8 @@ def init_webelement_obj(parameters, expected_locators=1):
     webElement = webElementObj(
         timeout=parameters.get('timeout', 10),
         variable=parameters.get('variable', None),
-        graceful=parameters.get('graceful', False))
+        graceful=parameters.get('graceful', False),
+        max_clicks=parameters.get('maxClicks', 20))
     webElement.selectors = []
     if expected_locators > 0:
         locators = parameters.get('locators', [])
@@ -286,6 +295,11 @@ def perform__switch_to_frame(bcs, parameters):
 def perform__click(bcs, parameters):
     webElement = init_webelement_obj(parameters)
     click_webelement(bcs, webElement)
+
+
+def perform__click_until_absent(bcs, parameters):
+    webElement = init_webelement_obj(parameters, 2)
+    click_until_absent_webelement(bcs, webElement)
 
 def perform__click_shadow(bcs, parameters):
     webElement = init_webelement_obj(parameters, 3)
@@ -378,6 +392,81 @@ def click_webelement(bcs, we):
             return True
     if we.graceful == False: raise RuntimeError(f"Element loading timeout") 
     else: return False
+
+
+def find_visible_element(driver, selector):
+    for element in driver.find_elements(selector.locator, selector.element):
+        try:
+            if element.is_displayed():
+                return element
+        except StaleElementReferenceException:
+            continue
+    return None
+
+
+def find_actionable_element(driver, selector):
+    element = find_visible_element(driver, selector)
+    if element is None:
+        return None
+    try:
+        return element if element.is_enabled() else None
+    except StaleElementReferenceException:
+        return None
+
+
+def count_visible_elements(driver, selector):
+    count = 0
+    for element in driver.find_elements(selector.locator, selector.element):
+        try:
+            if element.is_displayed():
+                count += 1
+        except StaleElementReferenceException:
+            continue
+    return count
+
+
+def click_until_absent_webelement(bcs, we):
+    button_selector, progress_selector = we.selectors
+    on_debug_save_web_page(bcs)
+    on_debug_pause_check(bcs)
+
+    for _ in range(we.max_clicks):
+        if find_visible_element(bcs.drv, button_selector) is None:
+            return True
+        try:
+            button = WebDriverWait(bcs.drv, we.timeout).until(
+                lambda driver: find_actionable_element(
+                    driver, button_selector))
+        except TimeoutException as error:
+            raise RuntimeError(
+                "Pagination control did not become actionable") from error
+
+        previous_count = count_visible_elements(bcs.drv, progress_selector)
+        bcs.drv.execute_script(
+            "arguments[0].scrollIntoView({behavior: 'instant', "
+            "block: 'center'});", button)
+        button.click()
+
+        def pagination_progressed(driver):
+            current_count = count_visible_elements(
+                driver, progress_selector)
+            return (
+                current_count > previous_count
+                or find_visible_element(driver, button_selector) is None
+            )
+
+        try:
+            WebDriverWait(bcs.drv, we.timeout).until(
+                pagination_progressed)
+        except TimeoutException as error:
+            raise RuntimeError(
+                "Pagination control did not load additional elements or "
+                "become unavailable") from error
+
+    if find_visible_element(bcs.drv, button_selector) is None:
+        return True
+    raise RuntimeError(
+        f"Pagination control remains available after {we.max_clicks} clicks")
 
 # Click shadow web element
 def clickshadow_webelement(bcs, we):
