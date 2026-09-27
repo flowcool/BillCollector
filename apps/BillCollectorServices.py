@@ -4,6 +4,7 @@ import os.path
 import yaml
 import inspect
 import threading
+from urllib.parse import urlparse
 
 from sshkeyboard import listen_keyboard, stop_listening
 
@@ -132,6 +133,7 @@ LOCATOR_MAP = {
 
 # Map yaml recipe action types to perform functions
 ACTION_MAP = {
+    "Navigate": "perform__navigate",
     "SwitchToParentFrame": "perform__switch_to_parent_frame",
     "SwitchToDefaultFrame": "perform__switch_to_default_frame",
     "SwitchToFrame": "perform__switch_to_frame",
@@ -282,6 +284,14 @@ def init_webelement_obj(parameters, expected_locators=1):
 def perform__switch_to_parent_frame(bcs, parameters):
     webElement = init_webelement_obj(parameters or {}, 0)
     switch_to_parent_frame_webelement(bcs, webElement)
+
+
+def perform__navigate(bcs, parameters):
+    url = (parameters or {}).get("url", "")
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("Navigate requires an absolute HTTPS URL")
+    bcs.drv.get(url)
 
 def perform__switch_to_default_frame(bcs, parameters):
     webElement = init_webelement_obj(parameters or {}, 0)
