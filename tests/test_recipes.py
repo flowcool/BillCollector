@@ -321,6 +321,79 @@ class RecipeValidationTests(unittest.TestCase):
 
     @patch(
         "BillCollectorServices.wait_for_new_download",
+        side_effect=[["invoice-1.pdf"], ["invoice-2.pdf"]],
+    )
+    @patch("BillCollectorServices.os.listdir", return_value=[])
+    def test_download_all_clicks_elements_without_urls(
+            self, _listdir, wait_for_download):
+        first = MagicMock()
+        second = MagicMock()
+        first.get_attribute.return_value = None
+        second.get_attribute.return_value = None
+        driver = MagicMock()
+        driver.current_window_handle = "main"
+        driver.current_url = "https://example.test/invoices"
+        driver.window_handles = ["main"]
+        driver.find_elements.return_value = [first, second]
+        browser = SimpleNamespace(drv=driver, dld="/downloads")
+        element = webElementObj(timeout=10)
+        element.selectors = [
+            webElementObj.selectorObj("css selector", "div.download")
+        ]
+
+        with patch("BillCollectorServices.WebDriverWait") as wait:
+            wait.return_value.until.return_value = [first, second]
+            downloaded = download_all_webelements(browser, element)
+
+        self.assertEqual(downloaded, ["invoice-1.pdf", "invoice-2.pdf"])
+        driver.execute_script.assert_any_call(
+            "arguments[0].click();", first)
+        driver.execute_script.assert_any_call(
+            "arguments[0].click();", second)
+        self.assertEqual(driver.execute_script.call_count, 2)
+        self.assertEqual(wait_for_download.call_count, 2)
+
+    @patch(
+        "BillCollectorServices.wait_for_new_download",
+        return_value=["invoice.pdf"],
+    )
+    @patch("BillCollectorServices.os.listdir", return_value=[])
+    def test_clickable_download_all_publishes_with_stable_synthetic_url(
+            self, _listdir, _wait_for_download):
+        state = MagicMock()
+        state.publish.return_value = "invoice.pdf"
+        control = MagicMock()
+        control.get_attribute.return_value = None
+        driver = MagicMock()
+        driver.current_window_handle = "main"
+        driver.current_url = "https://example.test/invoices"
+        driver.window_handles = ["main"]
+        driver.find_elements.return_value = [control]
+        browser = SimpleNamespace(
+            drv=driver,
+            dld="/downloads",
+            state=state,
+            output_dir="/output",
+        )
+        element = webElementObj(timeout=10)
+        element.selectors = [
+            webElementObj.selectorObj("css selector", "div.download")
+        ]
+
+        with patch("BillCollectorServices.WebDriverWait") as wait:
+            wait.return_value.until.return_value = [control]
+            downloaded = download_all_webelements(browser, element)
+
+        self.assertEqual(downloaded, ["invoice.pdf"])
+        state.has_url.assert_not_called()
+        state.publish.assert_called_once_with(
+            "https://example.test/invoices#clickable-download-1",
+            "/downloads/invoice.pdf",
+            "/output",
+        )
+
+    @patch(
+        "BillCollectorServices.wait_for_new_download",
         return_value=["invoice.pdf"],
     )
     @patch("BillCollectorServices.os.listdir", return_value=[])
