@@ -68,7 +68,17 @@ class PaginationDriver:
         self.loaded_items = 1
         self.total_items = total_items
         self.clicks = 0
+        self.scrolled_elements = []
         self.button = PaginationElement(self)
+
+    def execute_script(self, script, element):
+        self.assert_scroll_script(script)
+        self.scrolled_elements.append(element)
+
+    @staticmethod
+    def assert_scroll_script(script):
+        if "scrollIntoView" not in script or "block: 'center'" not in script:
+            raise AssertionError(f"Unexpected script: {script}")
 
     def find_elements(self, _locator, element):
         if element == "button.load-more":
@@ -223,6 +233,7 @@ class RecipeValidationTests(unittest.TestCase):
         self.assertTrue(click_until_absent_webelement(browser, element))
         self.assertEqual(driver.clicks, 2)
         self.assertEqual(driver.loaded_items, 3)
+        self.assertEqual(driver.scrolled_elements, [driver.button] * 2)
 
     @patch("BillCollectorServices.WebDriverWait")
     def test_click_until_absent_rejects_stalled_progress(self, wait):

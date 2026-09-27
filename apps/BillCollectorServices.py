@@ -442,6 +442,8 @@ def click_until_absent_webelement(bcs, we):
                 "Pagination control did not become actionable") from error
 
         previous_count = count_visible_elements(bcs.drv, progress_selector)
+        bcs.drv.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", button)
         button.click()
 
         def pagination_progressed(driver):
