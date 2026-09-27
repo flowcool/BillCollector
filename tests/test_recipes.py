@@ -77,7 +77,8 @@ class PaginationDriver:
 
     @staticmethod
     def assert_scroll_script(script):
-        if "scrollIntoView" not in script or "block: 'center'" not in script:
+        expected = ("scrollIntoView", "behavior: 'instant'", "block: 'center'")
+        if any(fragment not in script for fragment in expected):
             raise AssertionError(f"Unexpected script: {script}")
 
     def find_elements(self, _locator, element):

@@ -443,7 +443,8 @@ def click_until_absent_webelement(bcs, we):
 
         previous_count = count_visible_elements(bcs.drv, progress_selector)
         bcs.drv.execute_script(
-            "arguments[0].scrollIntoView({block: 'center'});", button)
+            "arguments[0].scrollIntoView({behavior: 'instant', "
+            "block: 'center'});", button)
         button.click()
 
         def pagination_progressed(driver):
