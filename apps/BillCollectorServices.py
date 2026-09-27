@@ -572,8 +572,7 @@ def download_all_webelements(bcs, we):
             bcs.drv.execute_script(
                 "window.open(arguments[0], '_blank');", download_url)
         else:
-            bcs.drv.execute_script(
-                "arguments[0].click();", elements[index])
+            elements[index].click()
         new_files = wait_for_new_download(
             bcs.dld, previous_files, we.timeout)
         if state:
