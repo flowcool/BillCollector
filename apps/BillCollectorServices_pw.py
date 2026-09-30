@@ -23,8 +23,8 @@ def InitBrowser(p, bcs):
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                      (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             )
-    except Exception as e:
-        logger.error(f"Error: {e}")
+    except Exception:
+        logger.error("Browser initialization failed")
         return None
     return browser
 
@@ -386,15 +386,11 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug):
         
         if bcs.yml == None: raise Exception(f"Recipe {sname} not found.")
         file_downloaded = perform_actions(bcs)
-        if file_downloaded:
-            logger.info(f"Service {service} for {bcs.usr} finished with downloaded file(s) {file_downloaded}.")
-        else:
-            logger.warning(f"Service {service} for {bcs.usr} finished without a file downloaded.")
+        logger.info("Service %s finished; downloads: %d", service, len(file_downloaded))
         on_debug_stop_keyboard_listener(bcs)
         return True
-    except Exception as e:
-        logger.exception(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
-        logger.error(f"Service {service} for {bcs.usr} not successfully finished.")
+    except Exception:
+        logger.error("Service did not finish successfully")
         on_debug_stop_keyboard_listener(bcs)
         return False
 
@@ -406,6 +402,8 @@ def perform_actions(bcs):
     try:
         with sync_playwright() as p:
             bcs.drv = InitBrowser(p, bcs)
+            if bcs.drv is None:
+                raise RuntimeError("Browser initialization failed")
             bcs.page = bcs.drv.new_page()
             bcs.page.context.clear_cookies()
             
@@ -414,7 +412,7 @@ def perform_actions(bcs):
             
             for service in services:
                     service_name = service.get('serviceName')
-                    logger.info(f"Processing Service: {service_name} for {bcs.usr}.")
+                    logger.info("Processing service: %s", service_name)
                     
                     # Initialize the database manager and create a service run table
                     bcs.db = DatabaseManager(DB_FILE)
@@ -426,6 +424,9 @@ def perform_actions(bcs):
 
                         step_state = process_step(bcs, step)
                         bcs.db.insert_page_status(bcs.run_table, step_state)
+                        if step_state.error_status:
+                            bcs.db.finalize_service_run(service_name, bcs.run_table, files_downloaded, "failure")
+                            raise RuntimeError(f"Step {step.get('step', 0)} failed")
 
                         # Check if the previous step expects a download
                         if check_parameter_in_json(step_state.locator_action, {"action": "expect_download"}):
@@ -438,11 +439,16 @@ def perform_actions(bcs):
                                     for nested_step in sorted(step["steps"], key=lambda x: x.get("step", 0)):
                                         step_state = process_step(bcs, nested_step)
                                         bcs.db.insert_page_status(bcs.run_table, step_state)
+                                        if step_state.error_status:
+                                            bcs.db.finalize_service_run(service_name, bcs.run_table, files_downloaded, "failure")
+                                            raise RuntimeError(f"Nested step {nested_step.get('step', 0)} failed")
                                 download = download_info.value
                                 filepath = os.path.join(DOWNLOAD_DIR, str(download_info.value.suggested_filename))
                                 download.save_as(filepath)
-                            except Exception as e:
-                                    result_value = f"failure: download error {e}"
+                            except Exception:
+                                    result_value = "failure: download error"
+                                    bcs.db.finalize_service_run(service_name, bcs.run_table, files_downloaded, "failure")
+                                    raise RuntimeError("Download step failed") from None
                             finally:
                                 if download:
                                     files_downloaded.append({
@@ -455,19 +461,28 @@ def perform_actions(bcs):
                         service_name=service_name,
                         run_table=bcs.run_table,
                         download_info = json.dumps(files_downloaded) if files_downloaded else {},
-                        result = "failure" if not files_downloaded or not all(entry["result"] == "success" for entry in files_downloaded) else "success"
+                        result = "failure" if not all(entry["result"] == "success" for entry in files_downloaded) else "success"
                     )
                     # Close the database connection
                     bcs.db.close_connection()
+                    bcs.db = None
 
-            # Close the page after processing all steps
-            bcs.page.close()
-            bcs.drv.close()
-
-    except Exception as e:
-        logger.exception(f"EXCEPTION in {inspect.currentframe().f_code.co_name}(): {e}")
+    except Exception as error:
+        logger.error("Playwright service run failed")
+        if isinstance(error, RuntimeError) and str(error).startswith(("Step ", "Nested step ", "Download step ", "Browser initialization ")):
+            raise
+        raise RuntimeError("Playwright service run failed") from None
     finally:
-        return files_downloaded
+        if getattr(bcs, "db", None) is not None:
+            bcs.db.close_connection()
+            bcs.db = None
+        try:
+            if getattr(bcs, "page", None) is not None:
+                bcs.page.close()
+        finally:
+            if getattr(bcs, "drv", None) is not None:
+                bcs.drv.close()
+    return files_downloaded
 
 def process_step(bcs, step):
     """ Processes a step by executing a chain of methods """
@@ -545,8 +560,8 @@ def process_step(bcs, step):
         processed_args = [process_argument(arg, bcs) for arg in arguments]
 
         if not method_name:
-            step_results.setdefault("error", []).append(f"method: {method_name}, message: Method entry missing 'method' key: {method_entry}")
-            continue # Skip to the next method entry.
+            page_state.set_error({"error": "Method entry missing 'method' key"})
+            return page_state
 
         # Special handling for "expect_download".
         if method_name == "expect_download":
@@ -574,10 +589,11 @@ def process_step(bcs, step):
                     if processed_args:
                         raise TypeError(f"Attribute '{method_name}' is not callable but arguments were provided: {processed_args}")
                     previous_result = method_executor               # Get the value of a property.
-            except Exception as e:
-                step_results.setdefault("error", []).append({"method": method_name, "message": str(e)})
-            finally:
+            except Exception:
+                step_results.setdefault("error", []).append({"method": method_name, "message": "method failed"})
                 page_state.set_error(step_results)
+                return page_state
+            page_state.set_error(step_results)
 
     return page_state
 

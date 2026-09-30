@@ -77,7 +77,7 @@ def get_json(url):
             if "No TOTP" in response.text: 
                 pass
             else: 
-                logger.error(f"Client error: {response.status_code} - {response.text}")
+                logger.error("Vault client error: HTTP %s", response.status_code)
                 sys.exit(1)
         else: 
             logger.error(f"Error with request: {e}")
@@ -93,7 +93,6 @@ def get_json(url):
 # Check Bitwarden API status
 def bitwarden_api_check_status(url):
     content = get_json(f"{url}/status")
-    logger.debug(content)
     if not is_json_property_value(content, "success", True): return False, None
     else: 
         if not is_json_property_value(content, "data_template_status", "unlocked"): return True, "locked"
@@ -130,7 +129,7 @@ def post_json(url, payload):
         logger.info("Successfully posted!")
         return json.dumps(response.json())
     else:
-        logger.error(f"Error: {response.status_code} - {response.text}")
+        logger.error("Vault request failed: HTTP %s", response.status_code)
         return False
 
 def get_json_property_value(content, prop):
@@ -177,6 +176,7 @@ def WebRetriDoc(self, type=None, service=None):
         sys.exit(1)
     
     matched = False
+    failed = False
     for automation_library in script.sections():
         if automation_library == None: break
         if type != None and automation_library.lower() != type.lower(): continue
@@ -195,7 +195,7 @@ def WebRetriDoc(self, type=None, service=None):
             # handle service variant with list of users in array
             for user in users:
                 service_user = f"{servicename} {user}".strip()
-                logger.info(f"Service {service_user} started.")
+                logger.info("Service %s started", servicename)
 
                 # Retrieve credentials
                 item = get_json(f"{self.api}/object/item/{service_user}")
@@ -208,12 +208,15 @@ def WebRetriDoc(self, type=None, service=None):
 
                 # Download Documents with the help of the appropriate automation library
                 if automation_library.lower() == "playwright":
-                    retrieve_from_service_with_playwright(servicename, uri, username, passsword, totp, self.debug)
+                    if not retrieve_from_service_with_playwright(servicename, uri, username, passsword, totp, self.debug):
+                        failed = True
     #
     #################
 
     if service is not None and not matched:
         logger.warning(f"Service filter '{service}' matched no service in {self.fname}; nothing was done.")
+        return False
+    return not failed
 
 if __name__ == "__main__":
     sys.stdout = sys.__stdout__
@@ -258,4 +261,4 @@ if __name__ == "__main__":
 
     setup_logging(LOG_DEFAULT_FILE, debug=bc.debug)
 
-    WebRetriDoc(bc, "playwright", service)
+    sys.exit(0 if WebRetriDoc(bc, "playwright", service) else 1)
