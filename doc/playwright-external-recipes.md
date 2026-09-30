@@ -11,6 +11,32 @@ variable is absent, the existing bundled recipes remain the default. An
 external directory is authoritative: a missing or invalid recipe is an error,
 never a silent fallback to a bundled version.
 
+For execution, set `BILLCOLLECTOR_RECIPE_APPROVALS_FILE` to an operator-owned
+JSON file **outside** the recipe directory. A separate approval is required for
+each Bitwarden item/account. The digest pins the exact recipe bytes, and the
+account origins must be a subset of the deployment-wide origin ceiling:
+
+```json
+{
+  "formatVersion": 1,
+  "accounts": {
+    "sample alice": {
+      "service": "sample",
+      "sha256": "<64 lowercase hex characters from sha256sum recipe-pw__sample.yaml>",
+      "origins": ["https://example.test"]
+    }
+  }
+}
+```
+
+Review the recipe and its origins together, calculate the SHA-256 of the
+reviewed file, then update the approval file. A changed recipe, unknown
+account, wrong service, or widened origin set fails **before** Bitwarden item
+or TOTP lookup. The approved YAML is parsed once and passed unchanged to the
+runner, avoiding a second file read after credentials are fetched. A final
+symlink for the approval file is rejected. Protect the approval file and its
+parent directory against writes by the recipe source or browser process.
+
 Example external recipe:
 
 ```yaml
@@ -61,10 +87,10 @@ browser opens. Bundled recipes retain their original HTTP(S) URL behavior.
 This is an operator-review gate, **not** a sandbox for untrusted YAML. A recipe
 can still click through to another origin, trigger a redirect, operate on a
 compromised allowed page, or cause a page to send entered credentials elsewhere.
-The top-level origin check also has a navigation race. Do not run arbitrary
-recipes: pin and review the separate recipe repository and its origin list
-together. Cross-origin SSO, iframe login, provenance/signatures, and stronger
-network policy need a separate design before production use.
+The top-level origin check blocks an observed redirect at credential fill, but
+still has a navigation race; it is not a network exfiltration boundary. Do not
+run arbitrary recipes. Cross-origin SSO, iframe login, signed provenance, and
+stronger network policy need a separate design before production use.
 
-This prototype does not change profile persistence, download publication,
-deduplication, or scheduling. Those are separate engine/runtime contracts.
+This local branch combines the external recipe contract with persistent profiles
+and durable publication. Scheduling is a separate engine/runtime contract.

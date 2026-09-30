@@ -5,8 +5,11 @@ configured directory; deployments should mount that directory read-only.
 """
 
 import argparse
+import hashlib
+import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -23,6 +26,7 @@ from .BillCollectorHelpers import (
 
 RECIPE_DIR_ENV = "BILLCOLLECTOR_RECIPES_DIR"
 EXTERNAL_ORIGINS_ENV = "BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS"
+APPROVALS_FILE_ENV = "BILLCOLLECTOR_RECIPE_APPROVALS_FILE"
 FORMAT_VERSION = 1
 CAPABILITIES = {"browser", "download"}
 SECRET_PLACEHOLDERS = {"{{USERNAME}}", "{{PASSWORD}}", "{{OTP}}"}
@@ -191,7 +195,7 @@ def validate_recipe_contract(recipe, service_name, external=False, allowed_origi
     return recipe
 
 
-def load_playwright_recipe(service_name, recipe_dir=None):
+def load_playwright_recipe(service_name, recipe_dir=None, *, allowed_origins=None, expected_sha256=None):
     """Load from a configured external directory, or the legacy bundled directory.
 
     Supplying an external directory is authoritative: missing or invalid recipes
@@ -202,7 +206,8 @@ def load_playwright_recipe(service_name, recipe_dir=None):
         raise RecipeContractError("service name is not a safe recipe filename")
     external_dir = recipe_dir if recipe_dir is not None else os.environ.get(RECIPE_DIR_ENV)
     external = external_dir is not None
-    allowed_origins = external_recipe_origins() if external else None
+    allowed_origins = (allowed_origins if allowed_origins is not None else
+                       external_recipe_origins()) if external else None
     directory = Path(external_dir if external else RECIPES_PLAYWRIGHT_DIR)
     recipe_path = directory / f"{RECIPES_PLAYWRIGHT_PREFIX}{normalized}.yaml"
     if recipe_path.is_symlink():
@@ -210,8 +215,10 @@ def load_playwright_recipe(service_name, recipe_dir=None):
     try:
         if recipe_path.stat().st_size > 1_000_000:
             raise RecipeContractError("recipe exceeds the 1 MB limit")
-        with recipe_path.open(encoding="utf-8") as stream:
-            recipe = yaml.safe_load(stream)
+        raw_recipe = recipe_path.read_bytes()
+        if expected_sha256 is not None and hashlib.sha256(raw_recipe).hexdigest() != expected_sha256:
+            raise RecipeContractError("recipe bytes differ from operator-approved SHA-256")
+        recipe = yaml.safe_load(raw_recipe)
         with open(RECIPES_PLAYWRIGHT_SCHEMA_FILE, encoding="utf-8") as stream:
             schema = yaml.safe_load(stream)
         validate(instance=recipe, schema=schema)
@@ -223,6 +230,47 @@ def load_playwright_recipe(service_name, recipe_dir=None):
     except OSError as exc:
         raise RecipeContractError(f"cannot read recipe {recipe_path}: {exc.strerror}") from exc
     return validate_recipe_contract(recipe, normalized, external=external, allowed_origins=allowed_origins)
+
+
+def preflight_external_recipe(service_name, account_id):
+    """Freeze an approved recipe and account-scoped origins before vault lookup."""
+    recipe_dir = os.environ.get(RECIPE_DIR_ENV)
+    approval_path = os.environ.get(APPROVALS_FILE_ENV)
+    if not recipe_dir or not approval_path or not os.path.isabs(approval_path):
+        raise RecipeContractError(f"external recipes require {APPROVALS_FILE_ENV}")
+    path = Path(approval_path)
+    if path.resolve().is_relative_to(Path(recipe_dir).resolve()):
+        raise RecipeContractError("approval file must be outside the recipe directory")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 1_000_000:
+                raise RecipeContractError("approval file must be a regular file under 1 MB")
+            approvals = json.load(stream)
+    except (OSError, ValueError) as exc:
+        raise RecipeContractError("cannot read operator approval file") from exc
+    if not isinstance(approvals, dict) or approvals.get("formatVersion") != 1:
+        raise RecipeContractError("approval file has an unsupported format")
+    accounts = approvals.get("accounts")
+    entry = accounts.get(account_id) if isinstance(accounts, dict) else None
+    normalized = service_name.lower().replace(" ", "_")
+    if not isinstance(entry, dict) or entry.get("service") != normalized:
+        raise RecipeContractError("service/account has no matching recipe approval")
+    digest = entry.get("sha256")
+    origins = entry.get("origins")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise RecipeContractError("approval needs a SHA-256 recipe pin")
+    if not isinstance(origins, list) or not origins or any(
+        not isinstance(item, str) or https_origin(item) != item for item in origins
+    ) or len(set(origins)) != len(origins):
+        raise RecipeContractError("approval needs unique exact HTTPS origins")
+    allowed = frozenset(origins)
+    if not allowed <= external_recipe_origins():
+        raise RecipeContractError("account origins exceed the deployment allowlist")
+    recipe = load_playwright_recipe(normalized, allowed_origins=allowed,
+                                    expected_sha256=digest)
+    return recipe, allowed
 
 
 if __name__ == "__main__":

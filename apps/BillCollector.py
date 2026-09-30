@@ -14,6 +14,7 @@ import configparser
 from flatten_json import flatten
 
 from BillCollectorServices_pw import retrieve_from_service_with_playwright
+from helpers.BillCollectorRecipeContract import RECIPE_DIR_ENV, RecipeContractError, preflight_external_recipe
 from helpers import *
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,17 @@ def WebRetriDoc(self, type=None, service=None):
                 service_user = f"{servicename} {user}".strip()
                 logger.info("Service %s started", servicename)
 
+                # Reject unapproved recipe bytes/account bindings before any
+                # credential or TOTP lookup. Pass the frozen parsed recipe on.
+                recipe_preflight = None
+                if automation_library.lower() == "playwright" and os.environ.get(RECIPE_DIR_ENV) is not None:
+                    try:
+                        recipe_preflight = preflight_external_recipe(servicename, service_user)
+                    except RecipeContractError:
+                        logger.error("External recipe is not approved for service %s", servicename)
+                        failed = True
+                        continue
+
                 # Retrieve credentials
                 item = get_json(f"{self.api}/object/item/{service_user}")
                 username = get_json_property_value(item, "data_login_username")
@@ -210,7 +222,7 @@ def WebRetriDoc(self, type=None, service=None):
                 if automation_library.lower() == "playwright":
                     if not retrieve_from_service_with_playwright(
                         servicename, uri, username, passsword, totp, self.debug,
-                        account_id=service_user,
+                        account_id=service_user, recipe_preflight=recipe_preflight,
                     ):
                         failed = True
     #

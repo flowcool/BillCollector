@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import json
 import os
 import sys
 import tempfile
@@ -15,9 +17,11 @@ from helpers.BillCollectorRecipeContract import (  # noqa: E402
     RecipeContractError,
     external_recipe_origins,
     load_playwright_recipe,
+    preflight_external_recipe,
     validate_recipe_contract,
 )
 from BillCollectorServices_pw import process_step, retrieve_from_service_with_playwright  # noqa: E402
+import BillCollector  # noqa: E402
 
 
 ALLOWED_ORIGINS = frozenset({"https://example.test"})
@@ -47,6 +51,63 @@ VALID_RECIPE = {
 
 
 class RecipeContractTests(unittest.TestCase):
+    def test_account_pin_and_origins_are_checked_before_vault_lookup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recipes = root / "recipes"
+            recipes.mkdir()
+            recipe_path = recipes / "recipe-pw__sample.yaml"
+            recipe_path.write_text(yaml.safe_dump(VALID_RECIPE), encoding="utf-8")
+            approval_path = root / "approvals.json"
+            approval = {"formatVersion": 1, "accounts": {"sample alice": {
+                "service": "sample",
+                "sha256": hashlib.sha256(recipe_path.read_bytes()).hexdigest(),
+                "origins": ["https://example.test"],
+            }}}
+            approval_path.write_text(json.dumps(approval), encoding="utf-8")
+            ini = root / "services.ini"
+            ini.write_text("[Playwright]\nsample = alice\n", encoding="utf-8")
+            settings = {
+                "BILLCOLLECTOR_RECIPES_DIR": str(recipes),
+                "BILLCOLLECTOR_RECIPE_APPROVALS_FILE": str(approval_path),
+                "BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS": "https://example.test",
+            }
+            with patch.dict(os.environ, settings):
+                recipe, origins = preflight_external_recipe("sample", "sample alice")
+                self.assertEqual(recipe["formatVersion"], 1)
+                self.assertEqual(origins, ALLOWED_ORIGINS)
+                config = BillCollector.defs("vault.local", "http://vault.local", fname=str(ini))
+                with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+                     patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
+                     patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
+                     patch.object(BillCollector, "is_json_property_value", return_value=True), \
+                     patch.object(BillCollector, "get_json", return_value='{"data":{}}'), \
+                     patch.object(BillCollector, "get_json_property_value", return_value="placeholder"), \
+                     patch.object(BillCollector, "retrieve_from_service_with_playwright", return_value=True) as run:
+                    self.assertTrue(BillCollector.WebRetriDoc(config, "playwright"))
+                    self.assertEqual(run.call_args.kwargs["recipe_preflight"], (recipe, origins))
+                with self.assertRaisesRegex(RecipeContractError, "no matching"):
+                    preflight_external_recipe("sample", "sample bob")
+                recipe_path.write_text(recipe_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+                with self.assertRaisesRegex(RecipeContractError, "differ"):
+                    preflight_external_recipe("sample", "sample alice")
+                with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+                     patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
+                     patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
+                     patch.object(BillCollector, "is_json_property_value", return_value=True), \
+                     patch.object(BillCollector, "get_json") as vault_lookup:
+                    self.assertFalse(BillCollector.WebRetriDoc(config, "playwright"))
+                    vault_lookup.assert_not_called()
+
+    def test_approval_file_cannot_live_in_recipe_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {
+                "BILLCOLLECTOR_RECIPES_DIR": directory,
+                "BILLCOLLECTOR_RECIPE_APPROVALS_FILE": str(Path(directory) / "approvals.json"),
+            }):
+                with self.assertRaisesRegex(RecipeContractError, "outside"):
+                    preflight_external_recipe("sample", "sample alice")
+
     def test_bundled_recipes_still_validate(self):
         directory = Path(__file__).resolve().parents[1] / "apps" / "recipes_playwright"
         names = [path.stem.removeprefix("recipe-pw__") for path in directory.glob("recipe-pw__*.yaml")]

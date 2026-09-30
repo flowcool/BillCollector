@@ -15,9 +15,9 @@ from helpers.BillCollectorRecipeContract import (
     RECIPE_DIR_ENV,
     RecipeContractError,
     SECRET_PLACEHOLDERS,
-    external_recipe_origins,
     https_origin,
     load_playwright_recipe,
+    preflight_external_recipe,
 )
 from profile_store import locked_profile
 from download_publication import DownloadPublisher, PublicationError
@@ -171,16 +171,23 @@ class PageState:
         """Sets the locator action with the help of transform_step_to_json()"""
         self.locator_action = locator_action
 
-def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *, account_id):
+def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *, account_id,
+                                          recipe_preflight=None):
     """Retrieve file from service - main function - Playwright variant    """
 
     bcs = ServiceObj(service=service, usr=user, pwd=pwd, otp=otp, dbg=debug, dld=DOWNLOAD_DIR,
                      account_id=account_id)
     on_debug_start_keyboard_listener(bcs)
     try:
-        bcs.yml = load_playwright_recipe(service)
         bcs.external_recipe = os.environ.get(RECIPE_DIR_ENV) is not None
-        bcs.allowed_recipe_origins = external_recipe_origins() if bcs.external_recipe else None
+        if bcs.external_recipe:
+            bcs.yml, bcs.allowed_recipe_origins = (
+                recipe_preflight if recipe_preflight is not None else
+                preflight_external_recipe(service, account_id)
+            )
+        else:
+            bcs.yml = load_playwright_recipe(service)
+            bcs.allowed_recipe_origins = None
         
         file_downloaded = perform_actions(bcs)
         logger.info("Service %s finished; published: %d", service,
