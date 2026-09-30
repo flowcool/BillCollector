@@ -10,7 +10,15 @@ import sys
 from datetime import datetime
 from playwright.sync_api import Playwright, sync_playwright, Route, Request, Page
 from helpers import *
-from helpers.BillCollectorRecipeContract import load_playwright_recipe
+from helpers.BillCollectorRecipeContract import (
+    EXTERNAL_ORIGINS_ENV,
+    RECIPE_DIR_ENV,
+    RecipeContractError,
+    SECRET_PLACEHOLDERS,
+    external_recipe_origins,
+    https_origin,
+    load_playwright_recipe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +391,8 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug):
     on_debug_start_keyboard_listener(bcs)
     try:
         bcs.yml = load_playwright_recipe(service)
+        bcs.external_recipe = os.environ.get(RECIPE_DIR_ENV) is not None
+        bcs.allowed_recipe_origins = external_recipe_origins() if bcs.external_recipe else None
         
         file_downloaded = perform_actions(bcs)
         logger.info("Service %s finished; downloads: %d", service, len(file_downloaded))
@@ -542,6 +552,16 @@ def process_step(bcs, step):
     for method_entry in step["methods"]:
         method_name = method_entry.get("method")
         arguments = method_entry.get("arguments", [])
+        if getattr(bcs, "external_recipe", False):
+            secret_values = [value for argument in arguments for value in argument.values()
+                             if isinstance(value, str) and value in SECRET_PLACEHOLDERS]
+            if secret_values:
+                if method_name != "fill" or arguments != [{"value": secret_values[0]}]:
+                    raise RecipeContractError("external credentials are only allowed in fill(value)")
+                if https_origin(bcs.page.url) not in bcs.allowed_recipe_origins:
+                    raise RecipeContractError(
+                        f"credential fill blocked: page origin is not in {EXTERNAL_ORIGINS_ENV}"
+                    )
         processed_args = [process_argument(arg, bcs) for arg in arguments]
 
         if not method_name:

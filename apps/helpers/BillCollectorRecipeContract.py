@@ -22,8 +22,10 @@ from .BillCollectorHelpers import (
 
 
 RECIPE_DIR_ENV = "BILLCOLLECTOR_RECIPES_DIR"
+EXTERNAL_ORIGINS_ENV = "BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS"
 FORMAT_VERSION = 1
 CAPABILITIES = {"browser", "download"}
+SECRET_PLACEHOLDERS = {"{{USERNAME}}", "{{PASSWORD}}", "{{OTP}}"}
 METHOD_ARGUMENTS = {
     "goto": ({"url": str}, {}),
     "locator": ({"selector": str}, {}),
@@ -35,11 +37,26 @@ METHOD_ARGUMENTS = {
     "get_by_test_id": ({"test_id": str}, {}),
     "click": ({}, {}),
     "fill": ({"value": str}, {}),
-    "press": ({"value": str}, {}),
+    "press": ({"key": str}, {}),
     "first": ({}, {}),
     "content_frame": ({}, {}),
     "expect_download": ({}, {}),
     "close": ({}, {}),
+}
+LOCATOR_METHODS = {
+    "locator", "get_by_label", "get_by_placeholder", "get_by_text",
+    "get_by_title", "get_by_role", "get_by_test_id",
+}
+METHOD_RECEIVERS = {
+    **{method: {"page", "locator", "frame_locator"} for method in LOCATOR_METHODS},
+    "goto": {"page"},
+    "expect_download": {"page"},
+    "close": {"page"},
+    "content_frame": {"locator"},
+    "first": {"locator"},
+    "click": {"locator"},
+    "fill": {"locator"},
+    "press": {"locator"},
 }
 
 
@@ -47,7 +64,36 @@ class RecipeContractError(ValueError):
     """A recipe is unavailable or outside the supported execution contract."""
 
 
-def _validate_steps(steps, location, capabilities):
+def https_origin(url):
+    """Return the exact HTTPS origin of a URL, or None if it is not usable."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            return None
+        host = parsed.hostname.lower()
+        if not re.fullmatch(r"[a-z0-9.-]+", host):
+            return None
+        port = parsed.port
+    except (TypeError, ValueError):
+        return None
+    return f"https://{host}{f':{port}' if port is not None else ''}"
+
+
+def external_recipe_origins(value=None):
+    """Require an operator-supplied, exact HTTPS origin allowlist."""
+    raw = os.environ.get(EXTERNAL_ORIGINS_ENV) if value is None else value
+    if not raw:
+        raise RecipeContractError(f"external recipes require {EXTERNAL_ORIGINS_ENV}")
+    origins = set()
+    for item in raw.split(","):
+        origin = item.strip()
+        if not origin or https_origin(origin) != origin:
+            raise RecipeContractError(f"{EXTERNAL_ORIGINS_ENV} needs exact HTTPS origins")
+        origins.add(origin)
+    return frozenset(origins)
+
+
+def _validate_steps(steps, location, capabilities, allowed_origins=None):
     if not isinstance(steps, list) or not steps:
         raise RecipeContractError(f"{location}: steps must be a non-empty list")
     for index, step in enumerate(steps):
@@ -57,6 +103,8 @@ def _validate_steps(steps, location, capabilities):
         methods = step.get("methods")
         if not isinstance(methods, list) or not methods:
             raise RecipeContractError(f"{where}: methods must be a non-empty list")
+        receiver = "page"
+        in_frame = False
         for method_index, entry in enumerate(methods):
             method_where = f"{where}.methods[{method_index}]"
             if not isinstance(entry, dict):
@@ -64,6 +112,8 @@ def _validate_steps(steps, location, capabilities):
             method = entry.get("method")
             if not isinstance(method, str) or method not in METHOD_ARGUMENTS:
                 raise RecipeContractError(f"{method_where}: unsupported method {method!r}")
+            if receiver not in METHOD_RECEIVERS[method]:
+                raise RecipeContractError(f"{method_where}: {method} is invalid on {receiver}")
             if method == "expect_download" and "download" not in capabilities:
                 raise RecipeContractError(f"{method_where}: download capability is required")
             raw_arguments = entry.get("arguments", [])
@@ -84,6 +134,11 @@ def _validate_steps(steps, location, capabilities):
                 expected_type = (required | optional)[key]
                 if not isinstance(value, expected_type) or (expected_type is str and not value):
                     raise RecipeContractError(f"{method_where}: invalid {key!r} value")
+                if (allowed_origins is not None and value in SECRET_PLACEHOLDERS
+                        and (method != "fill" or key != "value")):
+                    raise RecipeContractError(f"{method_where}: credentials are only allowed in fill(value)")
+                if (allowed_origins is not None and value in SECRET_PLACEHOLDERS and in_frame):
+                    raise RecipeContractError(f"{method_where}: credential fill inside a frame is unsupported")
             if method == "goto":
                 try:
                     url = urlsplit(arguments["url"])
@@ -91,19 +146,32 @@ def _validate_steps(steps, location, capabilities):
                         raise ValueError("missing HTTP(S) host")
                 except ValueError as exc:
                     raise RecipeContractError(f"{method_where}: goto requires an HTTP(S) URL") from exc
+                if allowed_origins is not None and https_origin(arguments["url"]) not in allowed_origins:
+                    raise RecipeContractError(f"{method_where}: goto origin is not allowed")
+            if method in LOCATOR_METHODS:
+                receiver = "locator"
+            elif method == "content_frame":
+                receiver = "frame_locator"
+                in_frame = True
+            elif method == "first":
+                receiver = "locator"
+            else:
+                receiver = "done"
         nested = step.get("steps")
         expects_download = any(entry["method"] == "expect_download" for entry in methods)
         if expects_download:
-            _validate_steps(nested, where, capabilities)
+            _validate_steps(nested, where, capabilities, allowed_origins)
         elif nested is not None:
             raise RecipeContractError(f"{where}: nested steps require expect_download")
 
 
-def validate_recipe_contract(recipe, service_name, external=False):
+def validate_recipe_contract(recipe, service_name, external=False, allowed_origins=None):
     """Validate one selected recipe before any browser work."""
     if not isinstance(recipe, dict):
         raise RecipeContractError("recipe must be a mapping")
     if external:
+        if allowed_origins is None:
+            allowed_origins = external_recipe_origins()
         if type(recipe.get("formatVersion")) is not int or recipe["formatVersion"] != FORMAT_VERSION:
             raise RecipeContractError("external recipe requires formatVersion: 1")
         capabilities = recipe.get("capabilities")
@@ -119,7 +187,7 @@ def validate_recipe_contract(recipe, service_name, external=False):
             or not isinstance(services[0], dict)
             or services[0].get("serviceName") != service_name):
         raise RecipeContractError("recipe must contain exactly the requested service")
-    _validate_steps(services[0].get("steps"), "services[0]", capabilities)
+    _validate_steps(services[0].get("steps"), "services[0]", capabilities, allowed_origins)
     return recipe
 
 
@@ -134,6 +202,7 @@ def load_playwright_recipe(service_name, recipe_dir=None):
         raise RecipeContractError("service name is not a safe recipe filename")
     external_dir = recipe_dir if recipe_dir is not None else os.environ.get(RECIPE_DIR_ENV)
     external = external_dir is not None
+    allowed_origins = external_recipe_origins() if external else None
     directory = Path(external_dir if external else RECIPES_PLAYWRIGHT_DIR)
     recipe_path = directory / f"{RECIPES_PLAYWRIGHT_PREFIX}{normalized}.yaml"
     if recipe_path.is_symlink():
@@ -153,7 +222,7 @@ def load_playwright_recipe(service_name, recipe_dir=None):
         raise RecipeContractError(f"invalid YAML recipe {recipe_path}") from exc
     except OSError as exc:
         raise RecipeContractError(f"cannot read recipe {recipe_path}: {exc.strerror}") from exc
-    return validate_recipe_contract(recipe, normalized, external=external)
+    return validate_recipe_contract(recipe, normalized, external=external, allowed_origins=allowed_origins)
 
 
 if __name__ == "__main__":

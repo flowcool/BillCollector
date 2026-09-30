@@ -43,7 +43,7 @@ services:
       - name: "E-Mail-Adresse"
     - method: press
       arguments:
-      - value: "Tab"
+      - key: "Tab"
   - step: 6
     description: ''
     methods:
