@@ -3,6 +3,7 @@
 import sys
 import os
 import stat
+import subprocess
 import tempfile
 import traceback
 from pathlib import Path
@@ -39,6 +40,22 @@ def main():
         assert len(output) == 1 and output[0].read_bytes() == PDF
         assert not list((root / "staging").iterdir())
     print("container contract: private image context and same-mount rename passed")
+
+
+def startup_contract():
+    """The non-root entrypoint must reach its work, not die on an unwritable path."""
+    assert os.geteuid() == 5678, "startup contract runs as the image user"
+    log_file = Path(os.environ["BILLCOLLECTOR_LOG_FILE"])
+    result = subprocess.run(
+        [sys.executable, "BillCollector.py", "bc_test.ini"], cwd="/apps",
+        capture_output=True, text=True, timeout=120,
+        env={k: v for k, v in os.environ.items() if k not in ("VAULT_HOST", "BW_API_URL")},
+    )
+    output = result.stdout + result.stderr
+    assert "PermissionError" not in output, output
+    assert log_file.is_file() and log_file.stat().st_size > 0, "entrypoint wrote no log"
+    assert result.returncode == 1, f"vault-less run must fail cleanly, got {result.returncode}"
+    print("container contract: non-root entrypoint starts and logs")
 
 
 def _run_as(uid, gid, action):
@@ -95,5 +112,7 @@ def shared_group_contract():
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--shared-group":
         shared_group_contract()
+    elif len(sys.argv) == 2 and sys.argv[1] == "--startup":
+        startup_contract()
     else:
         main()

@@ -50,6 +50,11 @@ jobs:
           --tmpfs /publication:uid=5678,gid=5678,mode=0700
           --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
           --entrypoint python3 billcollector-playwright-assurance /check.py
+      - name: Prove the non-root entrypoint starts and can write its log
+        run: >-
+          docker run --rm --network none
+          --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
+          --entrypoint python3 billcollector-playwright-assurance /check.py --startup
       - name: Prove shared-group DMS access without exposing private state
         run: >-
           docker run --rm --network none --user 0:0
