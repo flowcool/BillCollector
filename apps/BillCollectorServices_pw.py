@@ -5,6 +5,7 @@ import inspect
 import logging
 import sqlite3
 import json
+import sys
 
 from datetime import datetime
 from playwright.sync_api import Playwright, sync_playwright, Route, Request, Page
@@ -396,11 +397,9 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug):
 
 def perform_actions(bcs):
     """Perform actions from YAML recipe on web elements - helper function for dispatching actions"""
-    
     files_downloaded = []
-
-    try:
-        with sync_playwright() as p:
+    with sync_playwright() as p:
+        try:
             bcs.drv = InitBrowser(p, bcs)
             if bcs.drv is None:
                 raise RuntimeError("Browser initialization failed")
@@ -409,79 +408,67 @@ def perform_actions(bcs):
             
             # Parse the YAML structure
             services = bcs.yml.get('services', [])
-            
             for service in services:
-                    service_name = service.get('serviceName')
-                    logger.info("Processing service: %s", service_name)
-                    
-                    # Initialize the database manager and create a service run table
-                    bcs.db = DatabaseManager(DB_FILE)
+                service_name = service.get('serviceName')
+                logger.info("Processing service: %s", service_name)
+                bcs.db = DatabaseManager(DB_FILE)
+                bcs.run_table = None
+                service_files = []
+                run_result = "failure"
+                try:
                     bcs.run_table = bcs.db.create_service_run_table(service_name)
-
-                    # process all steps in the service
                     steps = service.get('steps', [])
-                    for step in sorted(steps, key=lambda x: x.get('step', 0)):  # Sort by step number
-
+                    for step in sorted(steps, key=lambda x: x.get('step', 0)):
                         step_state = process_step(bcs, step)
                         bcs.db.insert_page_status(bcs.run_table, step_state)
                         if step_state.error_status:
-                            bcs.db.finalize_service_run(service_name, bcs.run_table, files_downloaded, "failure")
                             raise RuntimeError(f"Step {step.get('step', 0)} failed")
 
-                        # Check if the previous step expects a download
                         if check_parameter_in_json(step_state.locator_action, {"action": "expect_download"}):
-                            result_value = "success"
-                            download_info = None
-                            download = None
                             try:
                                 with bcs.page.expect_download() as di:
-                                    download_info = di
                                     for nested_step in sorted(step["steps"], key=lambda x: x.get("step", 0)):
-                                        step_state = process_step(bcs, nested_step)
-                                        bcs.db.insert_page_status(bcs.run_table, step_state)
-                                        if step_state.error_status:
-                                            bcs.db.finalize_service_run(service_name, bcs.run_table, files_downloaded, "failure")
+                                        nested_state = process_step(bcs, nested_step)
+                                        bcs.db.insert_page_status(bcs.run_table, nested_state)
+                                        if nested_state.error_status:
                                             raise RuntimeError(f"Nested step {nested_step.get('step', 0)} failed")
-                                download = download_info.value
-                                filepath = os.path.join(DOWNLOAD_DIR, str(download_info.value.suggested_filename))
+                                download = di.value
+                                filepath = os.path.join(DOWNLOAD_DIR, str(download.suggested_filename))
                                 download.save_as(filepath)
                             except Exception:
-                                    result_value = "failure: download error"
-                                    bcs.db.finalize_service_run(service_name, bcs.run_table, files_downloaded, "failure")
-                                    raise RuntimeError("Download step failed") from None
-                            finally:
-                                if download:
-                                    files_downloaded.append({
-                                        "url": str(download.url),
-                                        "suggested_filename": str(download.suggested_filename),
-                                        "result": result_value})
-
-                    # All steps processed, finalize the service run
-                    bcs.db.finalize_service_run(
-                        service_name=service_name,
-                        run_table=bcs.run_table,
-                        download_info = json.dumps(files_downloaded) if files_downloaded else {},
-                        result = "failure" if not all(entry["result"] == "success" for entry in files_downloaded) else "success"
-                    )
-                    # Close the database connection
-                    bcs.db.close_connection()
-                    bcs.db = None
-
-    except Exception as error:
-        logger.error("Playwright service run failed")
-        if isinstance(error, RuntimeError) and str(error).startswith(("Step ", "Nested step ", "Download step ", "Browser initialization ")):
-            raise
-        raise RuntimeError("Playwright service run failed") from None
-    finally:
-        if getattr(bcs, "db", None) is not None:
-            bcs.db.close_connection()
-            bcs.db = None
-        try:
-            if getattr(bcs, "page", None) is not None:
-                bcs.page.close()
+                                raise RuntimeError("Download step failed") from None
+                            service_files.append({
+                                "url": str(download.url),
+                                "suggested_filename": str(download.suggested_filename),
+                                "result": "success",
+                            })
+                    run_result = "success"
+                    files_downloaded.extend(service_files)
+                finally:
+                    try:
+                        if bcs.run_table is not None:
+                            bcs.db.finalize_service_run(
+                                service_name, bcs.run_table, service_files, run_result
+                            )
+                    finally:
+                        bcs.db.close_connection()
+                        bcs.db = None
+        except Exception as error:
+            logger.error("Playwright service run failed")
+            if isinstance(error, RuntimeError) and str(error).startswith(("Step ", "Nested step ", "Download step ", "Browser initialization ")):
+                raise
+            raise RuntimeError("Playwright service run failed") from None
         finally:
-            if getattr(bcs, "drv", None) is not None:
-                bcs.drv.close()
+            cleanup_error = None
+            for resource in (getattr(bcs, "page", None), getattr(bcs, "drv", None)):
+                if resource is None:
+                    continue
+                try:
+                    resource.close()
+                except Exception:
+                    cleanup_error = True
+            if cleanup_error and not sys.exc_info()[0]:
+                raise RuntimeError("Browser cleanup failed")
     return files_downloaded
 
 def process_step(bcs, step):

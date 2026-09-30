@@ -58,7 +58,61 @@ class RunnerContractTests(unittest.TestCase):
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db):
             self.assertEqual(runner.perform_actions(bcs), [])
-        self.assertEqual(db.finalize_service_run.call_args.kwargs["result"], "success")
+        self.assertEqual(db.finalize_service_run.call_args.args[-1], "success")
+
+    def test_resources_close_before_playwright_context_exits(self):
+        lifecycle = []
+
+        class PlaywrightContext:
+            def __enter__(self):
+                lifecycle.append("start")
+                return object()
+
+            def __exit__(self, *_):
+                lifecycle.append("stop")
+
+        page = MagicMock()
+        browser = MagicMock()
+        browser.new_page.return_value = page
+        page.close.side_effect = lambda: lifecycle.append("page closed")
+        browser.close.side_effect = lambda: lifecycle.append("browser closed")
+        bcs = SimpleNamespace(yml={"services": []}, usr="user", db=None, page=None, drv=None)
+        with patch.object(runner, "sync_playwright", return_value=PlaywrightContext()), \
+             patch.object(runner, "InitBrowser", return_value=browser):
+            self.assertEqual(runner.perform_actions(bcs), [])
+        self.assertEqual(lifecycle, ["start", "page closed", "browser closed", "stop"])
+
+    def test_unexpected_step_exception_finalizes_failure(self):
+        db = MagicMock()
+        page = MagicMock()
+        browser = MagicMock()
+        browser.new_page.return_value = page
+        bcs = SimpleNamespace(yml={"services": [{"serviceName": "demo", "steps": [{"step": 1}]}]},
+                              usr="user", db=None, page=None, drv=None)
+        with patch.object(runner, "sync_playwright"), \
+             patch.object(runner, "InitBrowser", return_value=browser), \
+             patch.object(runner, "DatabaseManager", return_value=db), \
+             patch.object(runner, "process_step", side_effect=ValueError("private data")):
+            with self.assertRaisesRegex(RuntimeError, "Playwright service run failed"):
+                runner.perform_actions(bcs)
+        self.assertEqual(db.finalize_service_run.call_args.args[-1], "failure")
+        db.close_connection.assert_called_once()
+
+    def test_cleanup_failure_does_not_mask_step_failure(self):
+        db = MagicMock()
+        page = MagicMock()
+        browser = MagicMock()
+        browser.new_page.return_value = page
+        page.close.side_effect = RuntimeError("cleanup failed")
+        bcs = SimpleNamespace(yml={"services": [{"serviceName": "demo", "steps": [{"step": 1}]}]},
+                              usr="user", db=None, page=None, drv=None)
+        with patch.object(runner, "sync_playwright"), \
+             patch.object(runner, "InitBrowser", return_value=browser), \
+             patch.object(runner, "DatabaseManager", return_value=db), \
+             patch.object(runner, "process_step", side_effect=ValueError("private data")):
+            with self.assertRaisesRegex(RuntimeError, "Playwright service run failed"):
+                runner.perform_actions(bcs)
+        browser.close.assert_called_once()
 
     def test_service_failure_is_returned_to_cli_caller(self):
         with tempfile.TemporaryDirectory() as directory:
