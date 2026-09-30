@@ -4,6 +4,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -11,7 +12,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps"))
 
-from profile_store import prepare_profile
+from profile_store import locked_profile, prepare_profile
 import BillCollectorServices_pw as services
 
 
@@ -88,10 +89,12 @@ class ProfileStoreTests(unittest.TestCase):
             account = SimpleNamespace(account_id="Portal account-A", dbg=False)
 
             with patch.object(services, "CHROMIUM_PLAYWRIGHT_PROFILE", str(root)):
-                self.assertIs(services.InitBrowser(playwright, account), browser)
-                profile = Path(playwright.chromium.launch_persistent_context.call_args.kwargs["user_data_dir"])
-                (profile / "Cookies").write_text("session-survives", encoding="utf-8")
-                self.assertIs(services.InitBrowser(playwright, account), browser)
+                with locked_profile(root, account.account_id) as profile_dir:
+                    self.assertIs(services.InitBrowser(playwright, account, profile_dir), browser)
+                    profile = Path(profile_dir)
+                    (profile / "Cookies").write_text("session-survives", encoding="utf-8")
+                with locked_profile(root, account.account_id) as profile_dir:
+                    self.assertIs(services.InitBrowser(playwright, account, profile_dir), browser)
 
             calls = playwright.chromium.launch_persistent_context.call_args_list
             self.assertEqual(len(calls), 2)
@@ -108,10 +111,101 @@ class ProfileStoreTests(unittest.TestCase):
         account = SimpleNamespace(yml={"services": []}, dbg=False, account_id="Portal account-A")
 
         with patch.object(services, "sync_playwright", return_value=playwright_context), \
-             patch.object(services, "InitBrowser", return_value=browser):
+             patch.object(services, "InitBrowser", return_value=browser), \
+             patch.object(services, "locked_profile", return_value=nullcontext("/tmp/mock-profile")):
             self.assertEqual(services.perform_actions(account), [])
 
         browser.new_page.return_value.context.clear_cookies.assert_not_called()
+
+    def test_same_account_lock_blocks_second_run_until_browser_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            with locked_profile(root, "account-A"):
+                with self.assertRaisesRegex(RuntimeError, "already in use"):
+                    with locked_profile(root, "account-A"):
+                        pass
+                with locked_profile(root, "account-B"):
+                    pass
+            with locked_profile(root, "account-A"):
+                pass
+
+    def test_browser_failure_propagates_and_releases_profile_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            account = SimpleNamespace(yml={"services": []}, dbg=False, account_id="account-A")
+            playwright = SimpleNamespace(chromium=Mock())
+            playwright.chromium.launch_persistent_context.side_effect = RuntimeError("launch failed")
+            playwright_context = Mock()
+            playwright_context.__enter__ = Mock(return_value=playwright)
+            playwright_context.__exit__ = Mock(return_value=False)
+            with patch.object(services, "CHROMIUM_PLAYWRIGHT_PROFILE", str(root)), \
+                 patch.object(services, "sync_playwright", return_value=playwright_context):
+                with self.assertRaisesRegex(RuntimeError, "launch failed"):
+                    services.perform_actions(account)
+            with locked_profile(root, "account-A"):
+                pass
+
+    def test_launch_failure_marks_service_call_failed(self):
+        with patch.object(services, "CheckRecipe", return_value={"services": []}), \
+             patch.object(services, "perform_actions", side_effect=RuntimeError("launch failed")), \
+             patch.object(services, "on_debug_start_keyboard_listener"), \
+             patch.object(services, "on_debug_stop_keyboard_listener"), \
+             patch.object(services, "logger"):
+            self.assertFalse(services.retrieve_from_service_with_playwright(
+                "portal", "https://example.invalid", "user", "password", None, False,
+                account_id="account-A"))
+
+    def test_browser_closes_before_profile_lock_is_released(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            account = SimpleNamespace(yml={"services": []}, dbg=False, account_id="account-A")
+            playwright = SimpleNamespace(chromium=Mock())
+            browser = playwright.chromium.launch_persistent_context.return_value
+            browser.close.side_effect = lambda: self.assertRaises(RuntimeError, self._try_same_lock, root)
+            playwright_context = Mock()
+            playwright_context.__enter__ = Mock(return_value=playwright)
+            playwright_context.__exit__ = Mock(return_value=False)
+            with patch.object(services, "CHROMIUM_PLAYWRIGHT_PROFILE", str(root)), \
+                 patch.object(services, "sync_playwright", return_value=playwright_context):
+                self.assertEqual(services.perform_actions(account), [])
+            browser.close.assert_called_once()
+            with locked_profile(root, "account-A"):
+                pass
+
+    @staticmethod
+    def _try_same_lock(root):
+        with locked_profile(root, "account-A"):
+            pass
+
+    def test_preferences_publish_is_atomic_on_write_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "profiles"
+            from profile_store import _ensure_pdf_preferences
+            default = root / "Default"
+            default.mkdir(parents=True)
+            default_fd = os.open(default, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with patch("profile_store.os.link", side_effect=OSError("publish failed")):
+                    with self.assertRaisesRegex(OSError, "publish failed"):
+                        _ensure_pdf_preferences(default_fd)
+            finally:
+                os.close(default_fd)
+            self.assertEqual(list(default.iterdir()), [])
+
+    def test_docker_context_excludes_dummy_authentication_profile(self):
+        repo = Path(__file__).resolve().parents[1]
+        ignored = set((repo / ".dockerignore").read_text(encoding="utf-8").splitlines())
+        dummy_cookie = Path("apps/profiles/account-v1-dummy/Default/Cookies")
+        self.assertTrue(any(dummy_cookie.is_relative_to(Path(entry)) for entry in ignored))
+        self.assertIn("apps/profiles", ignored)
+        self.assertIn("apps/browser", ignored)
+        self.assertIn("apps/db", ignored)
+        self.assertIn("apps/Downloads", ignored)
+        self.assertIn("COPY apps/. .", (repo / "Dockerfile_pw").read_text(encoding="utf-8"))
+        self.assertNotIn("/apps/profiles", (repo / "Dockerfile_pw").read_text(encoding="utf-8"))
+        self.assertFalse(Path(services.CHROMIUM_PLAYWRIGHT_PROFILE).is_relative_to(repo / "apps"))
+        self.assertIn("ENV BILLCOLLECTOR_PROFILE_DIR=/var/lib/billcollector/profiles",
+                      (repo / "Dockerfile_pw").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -26,8 +26,9 @@ RECIPES_PLAYWRIGHT_SCHEMA_FILE = os.path.join(RECIPES_PLAYWRIGHT_DIR, "recipe-pw
 RECIPES_PLAYWRIGHT_PREFIX = "recipe-pw__"                                                   # Prefix for Playwright recipes
 RECIPES_PLAYWRIGHT_CODE_DIR = os.path.join(RECIPES_PLAYWRIGHT_DIR, ".code")                  # Directory for Playwright python code 
 CHROMIUM_PLAYWRIGHT_DIR = os.path.join(APP_DIR, "browser")                                  # Directory for Chromium Playwright
+_PROFILE_STATE_HOME = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
 CHROMIUM_PLAYWRIGHT_PROFILE = os.environ.get(
-    "BILLCOLLECTOR_PROFILE_DIR", os.path.join(APP_DIR, "profiles")
+    "BILLCOLLECTOR_PROFILE_DIR", os.path.join(_PROFILE_STATE_HOME, "billcollector", "profiles")
 )                                                                                           # Persistent Chromium profile root
 
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = CHROMIUM_PLAYWRIGHT_DIR                            # Set environment variable for Playwright browsers path

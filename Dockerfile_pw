@@ -8,6 +8,7 @@ WORKDIR /apps
 
 # Set environment variables
 ENV PLAYWRIGHT_BROWSERS_PATH=/apps/browser
+ENV BILLCOLLECTOR_PROFILE_DIR=/var/lib/billcollector/profiles
 
 # Install Python3
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -17,6 +18,7 @@ RUN apt-get update && apt-get install -y python3 python3-pip
 # Install pip requirements, app and browser
 ARG VER=unknown
 COPY apps/. .
+RUN install -d -m 0700 /var/lib/billcollector/profiles
 RUN pip3 install -r requirements.txt --break-system-packages
 RUN python3 -m playwright install --with-deps chromium ffmpeg
 

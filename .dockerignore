@@ -1,1 +1,9 @@
+.git
 **/Downloads
+.env
+**/.env
+apps/profiles
+apps/browser
+apps/db
+apps/Downloads
+**/__pycache__

@@ -18,23 +18,20 @@ from helpers.BillCollectorRecipeContract import (
     https_origin,
     load_playwright_recipe,
 )
-from profile_store import prepare_profile
+from profile_store import locked_profile
 
 logger = logging.getLogger(__name__)
 
-def InitBrowser(p, bcs):
+def InitBrowser(p, bcs, profile_dir=None):
     """Initialize the browser with a persistent context to always open PDF externally"""
-    try:
-        profile_dir = prepare_profile(CHROMIUM_PLAYWRIGHT_PROFILE, bcs.account_id)
-        browser = p.chromium.launch_persistent_context(
-            headless=not bcs.dbg,
-            user_data_dir=profile_dir,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-                     (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            )
-    except Exception:
-        logger.error("Browser initialization failed")
-        return None
+    if profile_dir is None:
+        raise ValueError("A locked profile directory is required")
+    browser = p.chromium.launch_persistent_context(
+        headless=not bcs.dbg,
+        user_data_dir=profile_dir,
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    )
     return browser
 
 class DatabaseManager:
@@ -388,11 +385,9 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *
 def perform_actions(bcs):
     """Perform actions from YAML recipe on web elements - helper function for dispatching actions"""
     files_downloaded = []
-    with sync_playwright() as p:
+    with sync_playwright() as p, locked_profile(CHROMIUM_PLAYWRIGHT_PROFILE, bcs.account_id) as profile_dir:
         try:
-            bcs.drv = InitBrowser(p, bcs)
-            if bcs.drv is None:
-                raise RuntimeError("Browser initialization failed")
+            bcs.drv = InitBrowser(p, bcs, profile_dir)
             bcs.page = bcs.drv.new_page()
             
             # Parse the YAML structure
