@@ -10,6 +10,7 @@ import sys
 from datetime import datetime
 from playwright.sync_api import Playwright, sync_playwright, Route, Request, Page
 from helpers import *
+from helpers.BillCollectorRecipeContract import load_playwright_recipe
 
 logger = logging.getLogger(__name__)
 
@@ -381,11 +382,8 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug):
     
     on_debug_start_keyboard_listener(bcs)
     try:
-        sname = service.lower().replace(" ", "_")
-        bcs.yml = CheckRecipe(os.path.join(RECIPES_PLAYWRIGHT_DIR,f"{RECIPES_PLAYWRIGHT_PREFIX}{sname}.yaml"),
-            RECIPES_PLAYWRIGHT_SCHEMA_FILE)
+        bcs.yml = load_playwright_recipe(service)
         
-        if bcs.yml == None: raise Exception(f"Recipe {sname} not found.")
         file_downloaded = perform_actions(bcs)
         logger.info("Service %s finished; downloads: %d", service, len(file_downloaded))
         on_debug_stop_keyboard_listener(bcs)

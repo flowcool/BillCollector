@@ -2,13 +2,23 @@
 $schema: "http://json-schema.org/draft-07/schema#"
 title: "Recipe Playwright YAML Schema"
 type: object
+required: [services]
 properties:
   $schema:
     type: string
+  formatVersion:
+    type: integer
+    const: 1
+  capabilities:
+    type: array
+    uniqueItems: true
+    items:
+      enum: [browser, download]
   services:
     type: array
     items:
       type: object
+      additionalProperties: false
       required:
         - serviceName
         - steps
@@ -24,6 +34,7 @@ properties:
 definitions:
   step:
     type: object
+    additionalProperties: false
     required:
       - step
     properties:
@@ -41,6 +52,7 @@ definitions:
           $ref: "#/definitions/step"
   method:
     type: object
+    additionalProperties: false
     required:
       - method
     properties:
