@@ -232,8 +232,8 @@ def WebRetriDoc(self, type=None, service=None):
     #
     #################
 
-    if service is not None and not matched:
-        logger.warning(f"Service filter '{service}' matched no service in {self.fname}; nothing was done.")
+    if not matched:
+        logger.warning(f"No service matched (library={type!r}, service={service!r}) in {self.fname}; nothing was done.")
         return False
     return not failed
 

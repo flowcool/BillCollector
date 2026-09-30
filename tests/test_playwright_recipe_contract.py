@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps"))
 from helpers.BillCollectorRecipeContract import (  # noqa: E402
     RecipeContractError,
     external_recipe_origins,
+    https_origin,
     load_playwright_recipe,
     preflight_external_recipe,
     validate_recipe_contract,
@@ -242,6 +243,13 @@ class RecipeContractTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(RecipeContractError, "origin is not allowed"):
             validate_recipe_contract(recipe, "sample", external=True, allowed_origins=ALLOWED_ORIGINS)
+
+    def test_https_origin_normalizes_default_port(self):
+        self.assertEqual(https_origin("https://Example.test:443/x"), "https://example.test")
+        self.assertEqual(https_origin("https://example.test:8443/x"), "https://example.test:8443")
+        with self.assertRaisesRegex(RecipeContractError, "exact HTTPS"):
+            external_recipe_origins("https://example.test:443")
+
 
     def test_external_placeholders_only_allowed_in_fill(self):
         recipe = copy.deepcopy(VALID_RECIPE)

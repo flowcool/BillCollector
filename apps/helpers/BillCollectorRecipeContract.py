@@ -107,7 +107,7 @@ def https_origin(url):
         port = parsed.port
     except (TypeError, ValueError):
         return None
-    return f"https://{host}{f':{port}' if port is not None else ''}"
+    return f"https://{host}{f':{port}' if port not in (None, 443) else ''}"
 
 
 def external_recipe_origins(value=None):

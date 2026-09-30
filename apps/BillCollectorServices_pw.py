@@ -1,6 +1,5 @@
 import os
 import re
-import inspect
 import logging
 import sqlite3
 import json
