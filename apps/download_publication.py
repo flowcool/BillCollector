@@ -241,30 +241,34 @@ class DownloadPublisher:
             final = self.output_dir / final_name
             has_stage = os.path.lexists(stage)
             has_final = os.path.lexists(final)
+            # Name the row so the operator can act on it (final_name is an opaque
+            # hash: safe to log and to search for in the DMS).
+            where = f"row {final_name} (status={status}, stage={has_stage}, final={has_final})"
             if has_stage and has_final:
-                raise PublicationError("Both staged and published artifacts exist")
+                raise PublicationError(f"Both staged and published artifacts exist for {where}")
             if status == "prepared" and has_stage:
                 try:
                     valid = stat.S_ISREG(stage.lstat().st_mode) and self._digest_and_sync(stage) == digest
                 except PublicationError:
                     valid = False
                 if not valid:
-                    raise PublicationError("Prepared artifact is corrupt")
+                    raise PublicationError(f"Prepared artifact is corrupt for {where}")
                 self._finish(stage, final, account_hash, digest)
             elif status == "renaming" and has_final and not has_stage:
                 if not stat.S_ISREG(final.lstat().st_mode):
-                    raise PublicationError("Published artifact is corrupt")
+                    raise PublicationError(f"Published artifact is corrupt for {where}")
                 if self.shared_gid is not None:
                     os.chown(final, -1, self.shared_gid)
                     os.chmod(final, 0o640)
                 else:
                     os.chmod(final, 0o600)
                 if self._digest_and_sync(final) != digest:
-                    raise PublicationError("Published artifact is corrupt")
+                    raise PublicationError(f"Published artifact is corrupt for {where}")
                 self._sync_directory(self.output_dir)
                 self._sync_directory(self.stage_dir)
                 self._set_status(account_hash, digest, "published")
             else:
                 raise PublicationError(
-                    "Publication state is ambiguous; manual recovery required"
+                    f"Publication state is ambiguous for {where}; manual recovery "
+                    "required, see doc/PLAYWRIGHT_PUBLICATION_POC.md (Manual recovery)"
                 )

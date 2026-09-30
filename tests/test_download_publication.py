@@ -290,9 +290,15 @@ class DownloadPublicationTests(unittest.TestCase):
             ).fetchone()
             publisher._set_status(row[0], row[1], "renaming")
             (publisher.stage_dir / row[2]).unlink()
-        with self.assertRaisesRegex(PublicationError, "ambiguous"):
+        with closing(sqlite3.connect(self.state / "publication.sqlite3")) as db:
+            final_name = db.execute("SELECT final_name FROM documents").fetchone()[0]
+        with self.assertRaisesRegex(PublicationError, "ambiguous") as raised:
             with self.publisher():
                 pass
+        # The operator needs the row identity and its on-disk state to recover.
+        self.assertIn(final_name, str(raised.exception))
+        self.assertIn("status=renaming", str(raised.exception))
+        self.assertIn("stage=False, final=False", str(raised.exception))
         with closing(sqlite3.connect(self.state / "publication.sqlite3")) as db:
             self.assertEqual(db.execute("SELECT status FROM documents").fetchone()[0], "renaming")
 

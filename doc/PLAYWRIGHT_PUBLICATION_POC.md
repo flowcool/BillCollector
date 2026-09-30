@@ -82,6 +82,29 @@ DMS-specific API, receipt, or retry policy is included. A manual recovery
 decision needs external evidence of whether the PDF was consumed; deleting the
 database or a row blindly may cause duplicate output.
 
+### Manual recovery
+
+One ambiguous or corrupt row stops `DownloadPublisher.__enter__` for **every**
+account until an operator resolves it; this is deliberate (a wrong guess can
+duplicate a document in the DMS). The error names the row by its opaque
+`final_name` (`<account-hash>-<sha256>.pdf`), its `status`, and whether the
+stage and final files exist. Procedure, with the run stopped:
+
+1. Copy `state/publication.sqlite3` (and `-wal`/`-journal` if present) aside.
+2. Search the DMS for the PDF and compare by content hash; the file name is
+   opaque and will not match a DMS title. Decide from the table below.
+3. Apply exactly one SQL statement with `sqlite3 state/publication.sqlite3`,
+   using the `final_name` from the error, then re-run.
+
+| Error says | Meaning | Action |
+|---|---|---|
+| `renaming`, `stage=True`, `final=False` | crash before the atomic rename; nothing reached `output/` | `UPDATE documents SET status='prepared' WHERE final_name='<name>';` the next run finishes it |
+| `renaming` or `prepared`, `stage=False`, `final=False`, PDF **is** in the DMS | the consumer took it | `UPDATE documents SET status='published' WHERE final_name='<name>';` |
+| same, PDF is **not** in the DMS | lost before consumption | `DELETE FROM documents WHERE final_name='<name>';` the next run downloads it again |
+| `stage=True`, `final=True` | both copies exist | compare `sha256sum` of both with the `sha256` in the name; keep the matching `output/` file, move the stage file to the trash, then set `status='published'` as above |
+| `Prepared artifact is corrupt` or `Published artifact is corrupt` | bytes differ from the recorded digest | keep the file for inspection (move it out of `staging/` or `output/`), then `DELETE` the row |
+| `Publication state is corrupt` | SQLite itself is unreadable | restore the copy from step 1 or inspect it; do not recreate the database while `output/` holds PDFs |
+
 M1 propagates runner and publication failures. M2/M3 supply the stable
 Bitwarden-item account identity and profile lock; the profile and publication
 locks now span the same account run. The old direct-download path was removed.
