@@ -31,10 +31,10 @@ class RunLocked(PublicationError):
 class DownloadPublisher:
     """Publish content once per stable account identity and byte-for-byte digest.
 
-    The state record is committed before the final rename. After a crash, a
-    prepared staging file can be renamed; if it is gone, either the final file
-    exists or a consumer already took it. This assumes no actor removes private
-    staging files and the DMS only consumes files in output_dir.
+    A durable prepared record precedes a durable rename intent. Recovery may
+    retry only before that intent: once a rename could have occurred, an absent
+    output might mean that the consumer already took it. Ambiguous states stop
+    for manual recovery instead of risking duplicate publication.
     """
 
     def __init__(self, state_dir: str | Path, output_dir: str | Path, staging_dir: str | Path):
@@ -69,11 +69,19 @@ class DownloadPublisher:
                     sha256 TEXT NOT NULL,
                     stage_name TEXT NOT NULL,
                     final_name TEXT NOT NULL,
-                    status TEXT NOT NULL CHECK (status IN ('prepared', 'published')),
+                    status TEXT NOT NULL CHECK (status IN ('prepared', 'renaming', 'published')),
                     PRIMARY KEY (account_hash, sha256)
                 )
             """)
             self._db.commit()
+            schema_sql = self._db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='documents'"
+            ).fetchone()[0]
+            if "'renaming'" not in schema_sql:
+                raise PublicationError(
+                    "Publication state schema is incompatible; manual migration required"
+                )
+            self._sync_directory(self.state_dir)
             self._recover()
             return self
         except BlockingIOError as exc:
@@ -131,6 +139,9 @@ class DownloadPublisher:
             if os.path.lexists(final):
                 raise PublicationError("Output path occupied without matching state")
 
+            # The stage entry must survive a crash before SQLite can durably
+            # refer to it. fsyncing the file alone does not persist its name.
+            self._sync_directory(self.stage_dir)
             self._db.execute(
                 "INSERT INTO documents VALUES (?, ?, ?, ?, 'prepared')",
                 (account_hash, digest, stage_name, final_name),
@@ -157,24 +168,38 @@ class DownloadPublisher:
             os.fsync(file.fileno())
         return digest.hexdigest()
 
-    def _finish(self, stage: Path, final: Path, account_hash: str, digest: str) -> None:
-        os.replace(stage, final)
-        directory_fd = os.open(self.output_dir, os.O_RDONLY | os.O_DIRECTORY)
+    @staticmethod
+    def _sync_directory(path: Path) -> None:
+        directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+
+    def _set_status(self, account_hash: str, digest: str, status: str) -> None:
         self._db.execute(
-            "UPDATE documents SET status='published' WHERE account_hash=? AND sha256=?",
-            (account_hash, digest),
+            "UPDATE documents SET status=? WHERE account_hash=? AND sha256=?",
+            (status, account_hash, digest),
         )
         self._db.commit()
 
+    def _finish(self, stage: Path, final: Path, account_hash: str, digest: str) -> None:
+        # Commit intent before rename. If the stage later reappears after a
+        # crash while the consumer has taken the output, retry is unsafe.
+        self._set_status(account_hash, digest, "renaming")
+        os.replace(stage, final)
+        # Persist the new destination first, then removal of the source. Both
+        # directory updates must be durable before recording publication.
+        self._sync_directory(self.output_dir)
+        self._sync_directory(self.stage_dir)
+        self._set_status(account_hash, digest, "published")
+
     def _recover(self) -> None:
         rows = self._db.execute(
-            "SELECT account_hash, sha256, stage_name, final_name FROM documents WHERE status='prepared'"
+            "SELECT account_hash, sha256, stage_name, final_name, status "
+            "FROM documents WHERE status IN ('prepared', 'renaming')"
         ).fetchall()
-        for account_hash, digest, stage_name, final_name in rows:
+        for account_hash, digest, stage_name, final_name, status in rows:
             if (
                 not re.fullmatch(r"[0-9a-f]{64}", account_hash)
                 or not re.fullmatch(r"[0-9a-f]{64}", digest)
@@ -184,21 +209,25 @@ class DownloadPublisher:
                 raise PublicationError("Invalid prepared publication state")
             stage = self.stage_dir / stage_name
             final = self.output_dir / final_name
-            if os.path.lexists(stage):
+            has_stage = os.path.lexists(stage)
+            has_final = os.path.lexists(final)
+            if has_stage and has_final:
+                raise PublicationError("Both staged and published artifacts exist")
+            if status == "prepared" and has_stage:
                 try:
                     valid = stat.S_ISREG(stage.lstat().st_mode) and self._digest_and_sync(stage) == digest
                 except PublicationError:
                     valid = False
                 if not valid:
                     raise PublicationError("Prepared artifact is corrupt")
-                if os.path.lexists(final):
-                    raise PublicationError("Both staged and published artifacts exist")
                 self._finish(stage, final, account_hash, digest)
+            elif status == "renaming" and has_final and not has_stage:
+                if not stat.S_ISREG(final.lstat().st_mode) or self._digest_and_sync(final) != digest:
+                    raise PublicationError("Published artifact is corrupt")
+                self._sync_directory(self.output_dir)
+                self._sync_directory(self.stage_dir)
+                self._set_status(account_hash, digest, "published")
             else:
-                # In the normal crash sequence, the rename happened and the
-                # downstream consumer may already have removed the final file.
-                self._db.execute(
-                    "UPDATE documents SET status='published' WHERE account_hash=? AND sha256=?",
-                    (account_hash, digest),
+                raise PublicationError(
+                    "Publication state is ambiguous; manual recovery required"
                 )
-                self._db.commit()

@@ -1,8 +1,11 @@
 """Offline publication contract tests; no browser, portal, or DMS required."""
 
 import hashlib
+import os
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -82,7 +85,15 @@ class DownloadPublicationTests(unittest.TestCase):
             with DownloadPublisher(self.state, self.output, self.output / ".stage"):
                 pass
 
-    def test_failed_rename_keeps_recoverable_stage(self):
+    def test_stage_directory_sync_precedes_prepared_record(self):
+        with self.publisher() as publisher:
+            with patch.object(publisher, "_sync_directory", side_effect=OSError("stage fsync failed")):
+                with self.assertRaisesRegex(OSError, "stage fsync failed"):
+                    publisher.publish(FakeDownload(), service="portal", account="alice")
+            self.assertEqual(publisher._db.execute("SELECT count(*) FROM documents").fetchone()[0], 0)
+            self.assertEqual(list(self.staging.iterdir()), [])
+
+    def test_crash_before_rename_intent_keeps_recoverable_stage(self):
         with self.publisher() as publisher:
             with patch.object(publisher, "_finish", side_effect=OSError("rename failed")):
                 with self.assertRaisesRegex(OSError, "rename failed"):
@@ -94,6 +105,71 @@ class DownloadPublicationTests(unittest.TestCase):
                 publisher.publish(FakeDownload(), service="portal", account="alice")
         with self.publisher() as publisher:
             self.assertEqual(len(list(self.output.glob("*.pdf"))), 1)
+            self.assertFalse(publisher.publish(FakeDownload(), service="portal", account="alice"))
+
+    def test_failed_rename_after_intent_blocks_ambiguous_retry(self):
+        with self.publisher() as publisher:
+            with patch("download_publication.os.replace", side_effect=OSError("rename failed")):
+                with self.assertRaisesRegex(OSError, "rename failed"):
+                    publisher.publish(FakeDownload(), service="portal", account="alice")
+            row = publisher._db.execute("SELECT status, stage_name FROM documents").fetchone()
+            self.assertEqual(row[0], "renaming")
+            self.assertTrue((self.staging / row[1]).exists())
+        with self.assertRaisesRegex(PublicationError, "ambiguous"):
+            with self.publisher():
+                pass
+
+    def test_rename_syncs_both_directories_before_marking_published(self):
+        with self.publisher() as publisher:
+            calls = []
+            sync_directory = publisher._sync_directory
+            set_status = publisher._set_status
+
+            def record_sync(path):
+                calls.append(("sync", path))
+                sync_directory(path)
+
+            def record_status(account_hash, digest, status):
+                calls.append(("status", status))
+                set_status(account_hash, digest, status)
+
+            with patch.object(publisher, "_sync_directory", side_effect=record_sync), patch.object(
+                publisher, "_set_status", side_effect=record_status
+            ):
+                self.assertTrue(publisher.publish(FakeDownload(), service="portal", account="alice"))
+            self.assertEqual(
+                calls,
+                [
+                    ("sync", self.staging),
+                    ("status", "renaming"),
+                    ("sync", self.output),
+                    ("sync", self.staging),
+                    ("status", "published"),
+                ],
+            )
+
+    def test_failed_stage_directory_sync_after_rename_recovers_from_final(self):
+        with self.publisher() as publisher:
+            sync_directory = publisher._sync_directory
+            calls = []
+
+            def fail_after_rename(path):
+                calls.append(path)
+                if calls == [self.staging, self.output, self.staging]:
+                    raise OSError("stage directory fsync failed")
+                sync_directory(path)
+
+            with patch.object(publisher, "_sync_directory", side_effect=fail_after_rename):
+                with self.assertRaisesRegex(OSError, "stage directory fsync failed"):
+                    publisher.publish(FakeDownload(), service="portal", account="alice")
+            self.assertEqual(
+                publisher._db.execute("SELECT status FROM documents").fetchone()[0], "renaming"
+            )
+            self.assertEqual(len(list(self.output.glob("*.pdf"))), 1)
+        with self.publisher() as publisher:
+            self.assertEqual(
+                publisher._db.execute("SELECT status FROM documents").fetchone()[0], "published"
+            )
             self.assertFalse(publisher.publish(FakeDownload(), service="portal", account="alice"))
 
     def test_recovers_prepared_stage_after_crash_before_rename(self):
@@ -114,7 +190,7 @@ class DownloadPublicationTests(unittest.TestCase):
             self.assertFalse(stage.exists())
             self.assertFalse(publisher.publish(FakeDownload(), service="portal", account="alice"))
 
-    def test_recovers_rename_after_consumer_took_final(self):
+    def test_missing_stage_and_consumed_final_blocks_instead_of_false_published(self):
         with self.publisher() as publisher:
             download = FakeDownload()
             with patch.object(publisher, "_finish", side_effect=RuntimeError("crash")):
@@ -123,14 +199,47 @@ class DownloadPublicationTests(unittest.TestCase):
             row = publisher._db.execute(
                 "SELECT stage_name, final_name FROM documents WHERE status='prepared'"
             ).fetchone()
-            (publisher.stage_dir / row[0]).rename(self.output / row[1])
+            os.replace(publisher.stage_dir / row[0], self.output / row[1])
             (self.output / row[1]).unlink()  # DMS consumed between rename and DB update.
+        with self.assertRaisesRegex(PublicationError, "ambiguous"):
+            with self.publisher():
+                pass
+        with closing(sqlite3.connect(self.state / "publication.sqlite3")) as db:
+            self.assertEqual(db.execute("SELECT status FROM documents").fetchone()[0], "prepared")
+
+    def test_renaming_with_no_stage_or_final_remains_ambiguous(self):
         with self.publisher() as publisher:
-            self.assertFalse(publisher.publish(FakeDownload(), service="portal", account="alice"))
-            self.assertEqual(
-                publisher._db.execute("SELECT status FROM documents").fetchone()[0],
-                "published",
-            )
+            with patch.object(publisher, "_finish", side_effect=RuntimeError("crash")):
+                with self.assertRaises(RuntimeError):
+                    publisher.publish(FakeDownload(), service="portal", account="alice")
+            row = publisher._db.execute(
+                "SELECT account_hash, sha256, stage_name FROM documents"
+            ).fetchone()
+            publisher._set_status(row[0], row[1], "renaming")
+            (publisher.stage_dir / row[2]).unlink()
+        with self.assertRaisesRegex(PublicationError, "ambiguous"):
+            with self.publisher():
+                pass
+        with closing(sqlite3.connect(self.state / "publication.sqlite3")) as db:
+            self.assertEqual(db.execute("SELECT status FROM documents").fetchone()[0], "renaming")
+
+    def test_old_state_schema_is_rejected_before_publish(self):
+        self.state.mkdir()
+        with closing(sqlite3.connect(self.state / "publication.sqlite3")) as db:
+            db.execute("""
+                CREATE TABLE documents (
+                    account_hash TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    stage_name TEXT NOT NULL,
+                    final_name TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('prepared', 'published')),
+                    PRIMARY KEY (account_hash, sha256)
+                )
+            """)
+            db.commit()
+        with self.assertRaisesRegex(PublicationError, "schema is incompatible"):
+            with self.publisher():
+                pass
 
     def test_corrupt_prepared_artifact_blocks_recovery_without_reset(self):
         with self.publisher() as publisher:
