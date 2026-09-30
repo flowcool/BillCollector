@@ -114,7 +114,7 @@ class DatabaseManager:
     def finalize_service_run(self, service_name, run_table, download_info, result):
         """Updates the Service table with timestamp_end, download_info, and result at the end of a service run."""
         timestamp_end = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        download_info_json = json.dumps(download_info) if download_info else None
+        download_info_json = json.dumps({"count": len(download_info)})
 
         self.cursor.execute("""
             UPDATE Service 
@@ -144,7 +144,9 @@ class PageState:
         self.step_number = step_number
 #        self.aria_snapshot = page.accessibility.snapshot()
 #        self.dom_status = page.content()
-        self.interactive_elements = self.set_interactive_elements(page)
+        # DOM snapshots can contain passwords, tokens, document names, and URLs.
+        # Keep this field empty until a separately reviewed privacy contract exists.
+        self.interactive_elements = []
         self.error_status = None
         self.locator_action = None
     
@@ -155,209 +157,6 @@ class PageState:
     def set_locator_action(self, locator_action):
         """Sets the locator action with the help of transform_step_to_json()"""
         self.locator_action = locator_action
-
-    def set_interactive_elements(self, page):
-        """
-        Waits for the page to load and gives the DOM time to update dynamically (using a MutationObserver),
-        then recursively scans the entire DOM for interactive elements and returns a deduplicated list of locator entries.
-        
-        Each locator entry is a dictionary containing:
-        - role: A generic role such as "button", "link", "textbox", "combobox", "label", "generic interactive", or "unknown".
-        - name: The non-empty text used by the locator.
-        - locator: A dictionary with:
-                • locatorType: One of "get_by_label", "get_by_title", "get_by_role", or "get_by_text".
-                • arguments: A dictionary with key arguments (e.g. {"text": "...", "exact": True} for text-based locators or
-                {"role": <role>, "name": <name>, "exact": True} for get_by_role).
-        - actionTypes: "textbox" elements get ["click", "fill"]; all others get ["click"].
-        - For a link (role "link"), if available, an extra "url" key holds the element’s href.
-        
-        This function is generic and does not depend on any fixed element. It uses a broad DOM traversal (querySelectorAll("*"))
-        and filters out only those elements that are visible and "likely interactive" (based on their tag, onclick attribute, or contenteditable). 
-        It computes a text value from each element’s innerText and its ::before and ::after pseudo-elements.
-        """
-
-        def safe_evaluate(page, script, max_attempts=3):
-            """Attempts to evaluate JavaScript on the page, retrying if necessary."""
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    return page.evaluate(script)  # Try evaluating
-                except Exception as e:
-                    logger.debug(f"Attempt {attempt}: Evaluation failed - {e}")
-                    time.sleep(1)  # Short delay before retrying
-            logger.warning("All attempts failed.")
-            return None  # Return None if evaluation consistently fails
-
-        # Use a MutationObserver to allow dynamic injection to occur.
-        js_observer = r'''async () => {
-            const observerTime = 3000; // wait for 3 seconds
-            await new Promise(resolve => {
-                const observer = new MutationObserver(() => {});
-                observer.observe(document.body, { childList: true, subtree: true });
-                setTimeout(() => { observer.disconnect(); resolve(); }, observerTime);
-            });
-            return true;
-        }'''
-        # Run the observer safely to ensure the DOM is stable.
-        if not safe_evaluate(page, js_observer): return None
-        
-        # Now, scan the entire DOM for "likely interactive" elements.
-        # We consider an element interactive if:
-        #   - Its tag is one of: button, a, input, textarea, select, summary, label
-        #   - OR it has an onclick attribute
-        #   - OR it is contenteditable.
-        js_collect = r'''() => {
-            const interactiveTags = ["button", "a", "input", "textarea", "select", "summary", "label"];
-            const isInteractive = el => {
-                const tag = el.tagName.toLowerCase();
-                return interactiveTags.includes(tag) ||
-                    el.hasAttribute("onclick") ||
-                    (el.getAttribute("contenteditable") && el.getAttribute("contenteditable").toLowerCase() === "true");
-            };
-            // Get all elements in the DOM.
-            const allEls = Array.from(document.querySelectorAll("*"));
-            // Filter: only visible and likely interactive.
-            const visibleInteractive = allEls.filter(el => {
-                const style = window.getComputedStyle(el);
-                if (!style || style.display === "none" || style.visibility === "hidden") return false;
-                return isInteractive(el);
-            });
-            // For each element, collect useful properties.
-            const cleanContent = str => {
-                if (!str || str === "none") return "";
-                return str.replace(/^["']|["']$/g, "").trim();
-            };
-            return visibleInteractive.map(el => {
-                const lbl = el.id ? document.querySelector('label[for="' + el.id + '"]') : null;
-                const beforeContent = window.getComputedStyle(el, "::before").getPropertyValue("content");
-                const afterContent = window.getComputedStyle(el, "::after").getPropertyValue("content");
-                const computedText = [cleanContent(beforeContent), el.innerText.trim(), cleanContent(afterContent)]
-                                    .filter(Boolean).join(" ").trim();
-                return {
-                    tag: el.tagName.toLowerCase(),
-                    innerText: el.innerText.trim(),
-                    computedText: computedText,
-                    ariaLabel: el.getAttribute("aria-label") || "",
-                    title: el.getAttribute("title") || "",
-                    placeholder: el.getAttribute("placeholder") || "",
-                    id: el.getAttribute("id") || "",
-                    onclick: el.getAttribute("onclick") || "",
-                    contenteditable: (el.getAttribute("contenteditable") || "").toLowerCase() === "true",
-                    href: el.tagName.toLowerCase() === "a" ? (el.getAttribute("href") || "").trim() : "",
-                    value: (el.value || "").toString().trim(),
-                    labelText: lbl ? lbl.innerText.trim() : ""
-                };
-            });
-        }'''
-        # Run the observer safely to ensure the DOM is stable.
-        elements_data = safe_evaluate(page, js_collect)
-        if not elements_data: return None
-
-        results = []
-        seen = set()
-        
-        # Map each element's tag to a generic role.
-        for data in elements_data:
-            tag = data["tag"]
-            inner_text = data["innerText"]
-            computed_text = data.get("computedText", "")
-            aria_label = data["ariaLabel"]
-            title_attr = data["title"]
-            placeholder = data["placeholder"]
-            elm_id = data["id"]
-            onclick = data["onclick"]
-            contenteditable_flag = data["contenteditable"]
-            href = data["href"]
-            value = data["value"]
-            label_text = data["labelText"]
-            
-            if tag in ["input", "textarea"]:
-                role_val = "textbox"
-            elif tag == "select":
-                role_val = "combobox"
-            elif tag == "button" or tag == "summary":
-                # Note: summary is an interactive element and we map it to "button".
-                role_val = "button"
-            elif tag == "a":
-                role_val = "link"
-            elif tag == "label":
-                role_val = "label"
-            elif onclick:
-                role_val = "generic interactive"
-            else:
-                role_val = "unknown"
-            
-            # Compute an accessible name.
-            if role_val == "textbox":
-                accessible_name = (aria_label.strip() or placeholder.strip() or value.strip() or label_text.strip())
-            else:
-                accessible_name = aria_label.strip()
-            
-            candidate_locators = []
-            
-            # Candidate #1: use get_by_label.
-            if accessible_name:
-                candidate_locators.append({
-                    "locatorType": "get_by_label",
-                    "arguments": {"text": accessible_name, "exact": True}
-                })
-            # Candidate #2: use get_by_title.
-            if title_attr.strip():
-                candidate_locators.append({
-                    "locatorType": "get_by_title",
-                    "arguments": {"text": title_attr.strip(), "exact": True}
-                })
-            # Candidate #3: use get_by_role.
-            if role_val in ["button", "link", "textbox", "combobox", "label", "generic interactive"]:
-                const_name = accessible_name if accessible_name else inner_text.strip()
-                if const_name:
-                    candidate_locators.append({
-                        "locatorType": "get_by_role",
-                        "arguments": {"role": role_val, "name": const_name, "exact": True}
-                    })
-            # Candidate #4: use get_by_text.
-            let_text = computed_text.strip() if computed_text.strip() else inner_text.strip()
-            if let_text:
-                candidate_locators.append({
-                    "locatorType": "get_by_text",
-                    "arguments": {"text": let_text, "exact": True}
-                })
-            
-            # Deduplicate locator candidates using a generated key.
-            for candidate in candidate_locators:
-                if candidate["locatorType"] in ["get_by_label", "get_by_title", "get_by_text"]:
-                    text_arg = candidate["arguments"].get("text", "").strip()
-                    if not text_arg:
-                        continue
-                    key = f"{candidate['locatorType']}:{text_arg}:exact={candidate['arguments'].get('exact', False)}"
-                elif candidate["locatorType"] == "get_by_role":
-                    role_arg = candidate["arguments"].get("role", "").strip()
-                    name_arg = candidate["arguments"].get("name", "").strip()
-                    if not role_arg or not name_arg:
-                        continue
-                    key = f"get_by_role:{role_arg}:{name_arg}:exact={candidate['arguments'].get('exact', False)}"
-                else:
-                    continue
-                if key in seen:
-                    continue
-                seen.add(key)
-                if candidate["locatorType"] == "get_by_role":
-                    final_name = candidate["arguments"].get("name", "").strip() or role_val
-                else:
-                    final_name = candidate["arguments"].get("text", "").strip()
-                if not final_name:
-                    continue
-                actions = ["click", "fill"] if role_val == "textbox" else ["click"]
-                entry = {
-                    "role": role_val,
-                    "name": final_name,
-                    "locator": candidate,
-                    "actionTypes": actions
-                }
-                if role_val == "link" and href.strip():
-                    entry["url"] = href.strip()
-                results.append(entry)
-        
-        return results
 
 def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *, account_id):
     """Retrieve file from service - main function - Playwright variant    """
@@ -421,11 +220,7 @@ def perform_actions(bcs):
                                 download.save_as(filepath)
                             except Exception:
                                 raise RuntimeError("Download step failed") from None
-                            service_files.append({
-                                "url": str(download.url),
-                                "suggested_filename": str(download.suggested_filename),
-                                "result": "success",
-                            })
+                            service_files.append({"result": "success"})
                     run_result = "success"
                     files_downloaded.extend(service_files)
                 finally:
@@ -483,32 +278,20 @@ def process_step(bcs, step):
         if not isinstance(step, dict) or "methods" not in step:
             raise ValueError("Invalid step format: Expected a dictionary with a 'methods' key.")
 
-        transformed_step = {
-            "description": step.get("description", ""),
-            "locators": [],
-            "actions": []
-        }
+        # Persist only method names. Recipe descriptions and argument values may
+        # contain credentials or private portal data, even before interpolation.
+        transformed_step = {"locators": [], "actions": []}
 
         for method_entry in step["methods"]:
             method_name = method_entry.get("method")
-            arguments = method_entry.get("arguments", [])
-
             if not method_name:
                 continue  # Skip invalid methods
 
             # Categorize as locator or action (just a simple heuristic based on action names)
             if method_name in ["click", "fill", "expect_download", "goto", "close", "content_frame", "first"]:
-                transformed_step["actions"] = transformed_step.get("actions", [])
-                transformed_step["actions"].append({
-                    "action": method_name,
-                    "arguments": {k: v for arg in arguments for k, v in arg.items()}
-                })
+                transformed_step["actions"].append({"action": method_name})
             else: # all other methods are considered locators
-                transformed_step["locators"] = transformed_step.get("locators", [])
-                transformed_step["locators"].append({
-                    "locator": method_name,
-                    "arguments": {k: v for arg in arguments for k, v in arg.items()}
-                })
+                transformed_step["locators"].append({"locator": method_name})
 
         return json.dumps(transformed_step, separators=(",", ":"))
 

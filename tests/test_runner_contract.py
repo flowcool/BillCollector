@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,33 @@ import BillCollectorServices_pw as runner
 
 
 class RunnerContractTests(unittest.TestCase):
+    def test_page_state_does_not_persist_dom_or_recipe_secrets(self):
+        secret = "SENTINEL_PRIVATE_VALUE"
+        page = MagicMock()
+        page.evaluate.side_effect = AssertionError("DOM inspection must be disabled")
+        bcs = SimpleNamespace(service="demo", page=page, usr="user", pwd=secret, otp=None)
+        step = {"step": 1, "description": secret, "methods": [
+            {"method": "get_by_role", "arguments": [{"role": "textbox", "name": secret}]},
+            {"method": "fill", "arguments": [{"value": "{{PASSWORD}}"}]},
+        ]}
+        page.get_by_role.return_value = MagicMock()
+        state = runner.process_step(bcs, step)
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "runs.sqlite3"
+            db = runner.DatabaseManager(db_path)
+            table = db.create_service_run_table("demo")
+            db.insert_page_status(table, state)
+            db.finalize_service_run("demo", table, [{"url": secret}], "success")
+            db.close_connection()
+            connection = sqlite3.connect(db_path)
+            try:
+                stored = "\n".join(connection.iterdump())
+            finally:
+                connection.close()
+        self.assertNotIn(secret, stored)
+        self.assertNotIn("{{PASSWORD}}", stored)
+        page.evaluate.assert_not_called()
+
     def test_browser_launch_uses_persistent_context(self):
         browser = object()
         playwright = SimpleNamespace(chromium=MagicMock())
@@ -24,8 +52,7 @@ class RunnerContractTests(unittest.TestCase):
 
     def test_bad_method_marks_step_failed_without_echoing_exception(self):
         bcs = SimpleNamespace(service="demo", page=SimpleNamespace(), usr="user", pwd="secret", otp=None)
-        with patch.object(runner.PageState, "set_interactive_elements", return_value=[]):
-            state = runner.process_step(bcs, {"step": 1, "methods": [{"method": "missing", "arguments": []}]})
+        state = runner.process_step(bcs, {"step": 1, "methods": [{"method": "missing", "arguments": []}]})
         self.assertTrue(state.error_status)
         self.assertNotIn("secret", str(state.error_status))
 
@@ -172,8 +199,7 @@ class RunnerContractTests(unittest.TestCase):
         with patch.object(runner, "sync_playwright"), \
              patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
              patch.object(runner, "InitBrowser", return_value=browser), \
-             patch.object(runner, "DatabaseManager", return_value=db), \
-             patch.object(runner.PageState, "set_interactive_elements", return_value=[]):
+             patch.object(runner, "DatabaseManager", return_value=db):
             with self.assertRaisesRegex(RuntimeError, "Playwright service run failed"):
                 runner.perform_actions(bcs)
         page.get_by_role.return_value.fill.assert_not_called()
