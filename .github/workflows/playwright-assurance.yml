@@ -55,6 +55,15 @@ jobs:
           docker run --rm --network none
           --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
           --entrypoint python3 billcollector-playwright-assurance /check.py --startup
+      - name: Prove host UID mounts support the entrypoint and Chromium
+        run: >-
+          docker run --rm --network none --user 1234:2345
+          --tmpfs /apps/db:uid=1234,gid=2345,mode=0700
+          --tmpfs /var/lib/billcollector/profiles:uid=1234,gid=2345,mode=0700
+          --tmpfs /var/lib/billcollector/publication:uid=1234,gid=2345,mode=0700
+          -e BILLCOLLECTOR_EXPECTED_UID=1234
+          --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
+          --entrypoint python3 billcollector-playwright-assurance /check.py --startup
       - name: Prove shared-group DMS access without exposing private state
         run: >-
           docker run --rm --network none --user 0:0

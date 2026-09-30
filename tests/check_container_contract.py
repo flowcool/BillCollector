@@ -2,6 +2,7 @@
 
 import sys
 import os
+import sqlite3
 import stat
 import subprocess
 import tempfile
@@ -43,8 +44,9 @@ def main():
 
 
 def startup_contract():
-    """The non-root entrypoint must reach its work, not die on an unwritable path."""
-    assert os.geteuid() == 5678, "startup contract runs as the image user"
+    """The non-root entrypoint and browser must use writable runtime mounts."""
+    expected_uid = int(os.environ.get("BILLCOLLECTOR_EXPECTED_UID", "5678"))
+    assert os.geteuid() == expected_uid, "startup contract runs as the expected user"
     log_file = Path(os.environ["BILLCOLLECTOR_LOG_FILE"])
     result = subprocess.run(
         [sys.executable, "BillCollector.py", "bc_test.ini"], cwd="/apps",
@@ -55,7 +57,21 @@ def startup_contract():
     assert "PermissionError" not in output, output
     assert log_file.is_file() and log_file.stat().st_size > 0, "entrypoint wrote no log"
     assert result.returncode == 1, f"vault-less run must fail cleanly, got {result.returncode}"
-    print("container contract: non-root entrypoint starts and logs")
+    with tempfile.TemporaryDirectory(dir=log_file.parent) as directory:
+        with sqlite3.connect(Path(directory) / "write-probe.sqlite") as database:
+            database.execute("CREATE TABLE write_probe (id INTEGER)")
+    from playwright.sync_api import sync_playwright
+
+    with tempfile.TemporaryDirectory(dir="/var/lib/billcollector/profiles") as profile:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch_persistent_context(profile, headless=True)
+            try:
+                page = browser.new_page()
+                page.goto("data:text/html,<h1>browser-ready</h1>")
+                assert page.locator("h1").inner_text() == "browser-ready"
+            finally:
+                browser.close()
+    print("container contract: non-root CLI, SQLite, and persistent Chromium start")
 
 
 def _run_as(uid, gid, action):
