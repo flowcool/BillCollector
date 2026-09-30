@@ -37,6 +37,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Prove runtime artifacts cannot enter Docker context
+        run: python3 tests/check_docker_context.py
       - run: docker build -f Dockerfile_pw -t billcollector-playwright-assurance .
       - name: Inspect image and exercise publication rename on one mount
         run: >-
