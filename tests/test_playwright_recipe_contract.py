@@ -208,7 +208,8 @@ class RecipeContractTests(unittest.TestCase):
                 with patch("BillCollectorServices_pw.perform_actions") as browser_work, \
                         patch("BillCollectorServices_pw.logger"):
                     self.assertFalse(retrieve_from_service_with_playwright(
-                        "sample", "https://example.test", "example", "unused", None, False
+                        "sample", "https://example.test", "example", "unused", None, False,
+                        account_id="sample example",
                     ))
                     browser_work.assert_not_called()
 
@@ -221,7 +222,8 @@ class RecipeContractTests(unittest.TestCase):
                 with patch("BillCollectorServices_pw.perform_actions") as browser_work, \
                         patch("BillCollectorServices_pw.logger"):
                     self.assertFalse(retrieve_from_service_with_playwright(
-                        "sample", "https://example.test", "example", "unused", None, False
+                        "sample", "https://example.test", "example", "unused", None, False,
+                        account_id="sample example",
                     ))
                     browser_work.assert_not_called()
 

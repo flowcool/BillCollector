@@ -140,13 +140,13 @@ class ProfileStoreTests(unittest.TestCase):
             playwright_context.__exit__ = Mock(return_value=False)
             with patch.object(services, "CHROMIUM_PLAYWRIGHT_PROFILE", str(root)), \
                  patch.object(services, "sync_playwright", return_value=playwright_context):
-                with self.assertRaisesRegex(RuntimeError, "launch failed"):
+                with self.assertRaisesRegex(RuntimeError, "Playwright service run failed"):
                     services.perform_actions(account)
             with locked_profile(root, "account-A"):
                 pass
 
     def test_launch_failure_marks_service_call_failed(self):
-        with patch.object(services, "CheckRecipe", return_value={"services": []}), \
+        with patch.object(services, "load_playwright_recipe", return_value={"services": []}), \
              patch.object(services, "perform_actions", side_effect=RuntimeError("launch failed")), \
              patch.object(services, "on_debug_start_keyboard_listener"), \
              patch.object(services, "on_debug_stop_keyboard_listener"), \

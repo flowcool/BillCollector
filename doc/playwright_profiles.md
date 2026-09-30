@@ -35,7 +35,8 @@ This is a local, mocked prototype. It does not migrate the previous shared
 `/apps/browser/profile`, and users may need to authenticate again. A changed
 Bitwarden item name creates a new profile. It does not implement authenticated
 backup/restore or a browser integration test with a real portal. Upstream's
-top-level runner still needs the M1 error contract to turn failed service runs
-into a nonzero process exit. Profile persistence cannot automate an
+The local integration branch combines this profile work with M1's error
+contract; offline tests cover failure propagation, but no real browser run
+has verified the combined path. Profile persistence cannot automate an
 out-of-band MFA approval, SMS, or email challenge; it only reuses a session
 while the portal still accepts it.

@@ -45,13 +45,12 @@ DMS-specific API, receipt, or retry policy is included. A manual recovery
 decision needs external evidence of whether the PDF was consumed; deleting the
 database or a row blindly may cause duplicate output.
 
-Runner integration should follow M1's error contract: `perform_actions()`
-currently returns from `finally`, masking exceptions, and
-`retrieve_from_service_with_playwright()` returns success even after a run with
-no successful downloads. M2 must settle stable account identity in recipe/API
-inputs; M3 must ensure the run lock and persistent browser profile have
-compatible lifetimes. A deployment change must provide the common mount with
-private staging outside the watched output tree.
+This module remains unconnected to the runner even in the local integration
+branch. M1 now propagates runner failures, but its direct-download path has not
+been replaced. M2/M3 supply a candidate stable account identity and profile
+lock; the publication lock and profile lock still need a single run-lifetime
+contract. A deployment change must provide the common mount with private
+staging outside the watched output tree.
 
 Offline verification:
 

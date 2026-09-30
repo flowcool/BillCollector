@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -18,8 +19,7 @@ class RunnerContractTests(unittest.TestCase):
         browser = object()
         playwright = SimpleNamespace(chromium=MagicMock())
         playwright.chromium.launch_persistent_context.return_value = browser
-        with patch.object(runner, "init_browser_profile", return_value=True):
-            self.assertIs(runner.InitBrowser(playwright, SimpleNamespace(dbg=False)), browser)
+        self.assertIs(runner.InitBrowser(playwright, SimpleNamespace(dbg=False), "/tmp/mock-profile"), browser)
         self.assertFalse(playwright.chromium.launch_persistent_context.call_args.kwargs["headless"] is False)
 
     def test_bad_method_marks_step_failed_without_echoing_exception(self):
@@ -35,8 +35,9 @@ class RunnerContractTests(unittest.TestCase):
         browser = MagicMock()
         browser.new_page.return_value = page
         bcs = SimpleNamespace(yml={"services": [{"serviceName": "demo", "steps": [{"step": 1}]}]},
-                              usr="user", db=None, page=None, drv=None)
+                              usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright") as pw, \
+             patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db), \
              patch.object(runner, "process_step", return_value=SimpleNamespace(error_status={"error": "failed"})):
@@ -53,8 +54,9 @@ class RunnerContractTests(unittest.TestCase):
         browser = MagicMock()
         browser.new_page.return_value = page
         bcs = SimpleNamespace(yml={"services": [{"serviceName": "demo", "steps": []}]},
-                              usr="user", db=None, page=None, drv=None)
+                              usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright"), \
+             patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db):
             self.assertEqual(runner.perform_actions(bcs), [])
@@ -76,8 +78,9 @@ class RunnerContractTests(unittest.TestCase):
         browser.new_page.return_value = page
         page.close.side_effect = lambda: lifecycle.append("page closed")
         browser.close.side_effect = lambda: lifecycle.append("browser closed")
-        bcs = SimpleNamespace(yml={"services": []}, usr="user", db=None, page=None, drv=None)
+        bcs = SimpleNamespace(yml={"services": []}, usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright", return_value=PlaywrightContext()), \
+             patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
              patch.object(runner, "InitBrowser", return_value=browser):
             self.assertEqual(runner.perform_actions(bcs), [])
         self.assertEqual(lifecycle, ["start", "page closed", "browser closed", "stop"])
@@ -88,8 +91,9 @@ class RunnerContractTests(unittest.TestCase):
         browser = MagicMock()
         browser.new_page.return_value = page
         bcs = SimpleNamespace(yml={"services": [{"serviceName": "demo", "steps": [{"step": 1}]}]},
-                              usr="user", db=None, page=None, drv=None)
+                              usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright"), \
+             patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db), \
              patch.object(runner, "process_step", side_effect=ValueError("private data")):
@@ -105,8 +109,9 @@ class RunnerContractTests(unittest.TestCase):
         browser.new_page.return_value = page
         page.close.side_effect = RuntimeError("cleanup failed")
         bcs = SimpleNamespace(yml={"services": [{"serviceName": "demo", "steps": [{"step": 1}]}]},
-                              usr="user", db=None, page=None, drv=None)
+                              usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright"), \
+             patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db), \
              patch.object(runner, "process_step", side_effect=ValueError("private data")):
@@ -128,6 +133,51 @@ class RunnerContractTests(unittest.TestCase):
                  patch.object(BillCollector, "retrieve_from_service_with_playwright", side_effect=[True, False]) as retrieve:
                 self.assertFalse(BillCollector.WebRetriDoc(config, "playwright"))
             self.assertEqual(retrieve.call_count, 2)
+
+    def test_profile_startup_failure_reaches_cli_caller(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ini = os.path.join(directory, "services.ini")
+            Path(ini).write_text("[Playwright]\ndemo = first\n", encoding="utf-8")
+            config = BillCollector.defs("vault.local", "http://vault.local", fname=ini)
+            with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+                 patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
+                 patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
+                 patch.object(BillCollector, "is_json_property_value", return_value=True), \
+                 patch.object(BillCollector, "get_json", return_value='{"data":{}}'), \
+                 patch.object(BillCollector, "get_json_property_value", return_value="placeholder"), \
+                 patch.object(BillCollector, "retrieve_from_service_with_playwright",
+                              side_effect=runner.retrieve_from_service_with_playwright), \
+                 patch.object(runner, "load_playwright_recipe", return_value={"services": []}), \
+                 patch.object(runner, "sync_playwright"), \
+                 patch.object(runner, "locked_profile", side_effect=PermissionError("private profile")):
+                self.assertFalse(BillCollector.WebRetriDoc(config, "playwright"))
+
+    def test_runtime_credential_origin_rejection_fails_service(self):
+        page = MagicMock()
+        page.url = "https://evil.test/login"
+        page.get_by_role.return_value = MagicMock()
+        browser = MagicMock()
+        browser.new_page.return_value = page
+        step = {"step": 1, "methods": [
+            {"method": "get_by_role", "arguments": [{"role": "textbox"}]},
+            {"method": "fill", "arguments": [{"value": "{{PASSWORD}}"}]},
+        ]}
+        bcs = SimpleNamespace(
+            yml={"services": [{"serviceName": "demo", "steps": [step]}]},
+            service="demo", usr="user", pwd="secret", otp=None, dbg=False,
+            account_id="demo user", db=None, page=None, drv=None,
+            external_recipe=True, allowed_recipe_origins=frozenset({"https://good.test"}),
+        )
+        db = MagicMock()
+        with patch.object(runner, "sync_playwright"), \
+             patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
+             patch.object(runner, "InitBrowser", return_value=browser), \
+             patch.object(runner, "DatabaseManager", return_value=db), \
+             patch.object(runner.PageState, "set_interactive_elements", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "Playwright service run failed"):
+                runner.perform_actions(bcs)
+        page.get_by_role.return_value.fill.assert_not_called()
+        self.assertEqual(db.finalize_service_run.call_args.args[-1], "failure")
 
     def test_vault_response_is_not_logged(self):
         secret = "SECRET_FROM_RESPONSE"
