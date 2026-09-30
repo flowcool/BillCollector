@@ -37,19 +37,30 @@ class DownloadPublisher:
     for manual recovery instead of risking duplicate publication.
     """
 
-    def __init__(self, state_dir: str | Path, output_dir: str | Path, staging_dir: str | Path):
+    def __init__(self, state_dir: str | Path, output_dir: str | Path, staging_dir: str | Path,
+                 *, shared_gid: int | None = None):
+        if shared_gid is not None and (type(shared_gid) is not int or shared_gid <= 0):
+            raise ValueError("Shared publication GID must be a positive integer")
         self.state_dir = Path(state_dir)
         self.output_dir = Path(output_dir)
         self.stage_dir = Path(staging_dir)
+        self.shared_gid = shared_gid
         self._lock_fd: int | None = None
         self._db: sqlite3.Connection | None = None
 
     def __enter__(self) -> "DownloadPublisher":
+        root = self.output_dir.parent
+        if (self.state_dir.parent != root or self.stage_dir.parent != root
+                or root.is_symlink()):
+            raise PublicationError("Publication directories need one trusted, non-symlinked root")
+        if self.shared_gid is not None and os.getgid() != self.shared_gid:
+            raise PublicationError("Shared publication GID must be the process primary GID")
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.stage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if not self.stage_dir.is_dir() or self.stage_dir.is_symlink():
-            raise PublicationError("Staging path must be a private directory")
+        if any(path.is_symlink() or not path.is_dir()
+               for path in (self.state_dir, self.output_dir, self.stage_dir)):
+            raise PublicationError("Publication paths must be real directories")
         paths = [self.state_dir.resolve(), self.output_dir.resolve(), self.stage_dir.resolve()]
         if len(set(paths)) != 3 or any(
             left in right.parents for left in paths for right in paths if left != right
@@ -57,7 +68,19 @@ class DownloadPublisher:
             raise PublicationError("State, output, and staging must be disjoint")
         if self.stage_dir.stat().st_dev != self.output_dir.stat().st_dev:
             raise PublicationError("Staging and output must be on the same filesystem")
+        os.chmod(self.state_dir, 0o700)
         os.chmod(self.stage_dir, 0o700)
+        if self.shared_gid is None:
+            os.chmod(root, 0o700)
+            os.chmod(self.output_dir, 0o700)
+        else:
+            if root.stat().st_uid != os.geteuid() or self.output_dir.stat().st_uid != os.geteuid():
+                raise PublicationError("Shared publication paths must be owned by the runner")
+            os.chown(root, -1, self.shared_gid)
+            os.chown(self.output_dir, -1, self.shared_gid)
+            # Opt-in group traversal and trusted DMS read/delete access only.
+            os.chmod(root, 0o710)  # nosec B103
+            os.chmod(self.output_dir, 0o2770)  # nosec B103
         self._lock_fd = os.open(self.state_dir / "run.lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
             fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -184,6 +207,13 @@ class DownloadPublisher:
         self._db.commit()
 
     def _finish(self, stage: Path, final: Path, account_hash: str, digest: str) -> None:
+        if self.shared_gid is not None:
+            os.chown(stage, -1, self.shared_gid)
+            os.chmod(stage, 0o640)
+        else:
+            os.chmod(stage, 0o600)
+        with stage.open("rb") as source:
+            os.fsync(source.fileno())
         # Commit intent before rename. If the stage later reappears after a
         # crash while the consumer has taken the output, retry is unsafe.
         self._set_status(account_hash, digest, "renaming")
@@ -222,7 +252,14 @@ class DownloadPublisher:
                     raise PublicationError("Prepared artifact is corrupt")
                 self._finish(stage, final, account_hash, digest)
             elif status == "renaming" and has_final and not has_stage:
-                if not stat.S_ISREG(final.lstat().st_mode) or self._digest_and_sync(final) != digest:
+                if not stat.S_ISREG(final.lstat().st_mode):
+                    raise PublicationError("Published artifact is corrupt")
+                if self.shared_gid is not None:
+                    os.chown(final, -1, self.shared_gid)
+                    os.chmod(final, 0o640)
+                else:
+                    os.chmod(final, 0o600)
+                if self._digest_and_sync(final) != digest:
                     raise PublicationError("Published artifact is corrupt")
                 self._sync_directory(self.output_dir)
                 self._sync_directory(self.stage_dir)

@@ -47,6 +47,12 @@ jobs:
       - name: Inspect image and exercise publication rename on one mount
         run: >-
           docker run --rm --network none
-          --mount type=tmpfs,destination=/publication
+          --tmpfs /publication:uid=5678,gid=5678,mode=0700
           --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
           --entrypoint python3 billcollector-playwright-assurance /check.py
+      - name: Prove shared-group DMS access without exposing private state
+        run: >-
+          docker run --rm --network none --user 0:0
+          --tmpfs /publication:uid=5678,gid=5678,mode=0711
+          --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
+          --entrypoint python3 billcollector-playwright-assurance /check.py --shared-group

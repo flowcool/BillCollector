@@ -4,6 +4,7 @@ import errno
 import hashlib
 import os
 import sqlite3
+import stat
 import tempfile
 import unittest
 from contextlib import closing
@@ -63,6 +64,35 @@ class DownloadPublicationTests(unittest.TestCase):
             self.assertTrue(publisher.publish(FakeDownload(), service="portal", account="bob"))
         self.assertEqual(len(list(self.output.glob("*.pdf"))), 2)
 
+    def test_default_publication_remains_private(self):
+        self.output.mkdir(mode=0o777)
+        os.chmod(self.output, 0o777)
+        with self.publisher() as publisher:
+            publisher.publish(FakeDownload(), service="portal", account="alice")
+        self.assertEqual(stat.S_IMODE(self.root.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(next(self.output.iterdir()).stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.state.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(self.staging.stat().st_mode), 0o700)
+
+    def test_explicit_group_sharing_preserves_private_state_and_staging(self):
+        with DownloadPublisher(self.state, self.output, self.staging,
+                               shared_gid=os.getgid()) as publisher:
+            publisher.publish(FakeDownload(), service="portal", account="alice")
+        published = next(self.output.iterdir())
+        self.assertEqual(stat.S_IMODE(self.root.stat().st_mode), 0o710)
+        self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), 0o2770)
+        self.assertEqual(stat.S_IMODE(published.stat().st_mode), 0o640)
+        self.assertEqual(published.stat().st_gid, os.getgid())
+        self.assertEqual(stat.S_IMODE(self.state.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(self.staging.stat().st_mode), 0o700)
+
+    def test_shared_group_must_match_process_primary_group(self):
+        with self.assertRaisesRegex(PublicationError, "primary GID"):
+            with DownloadPublisher(self.state, self.output, self.staging,
+                                   shared_gid=os.getgid() + 1):
+                pass
+
     def test_failed_and_invalid_downloads_never_appear_in_output(self):
         with self.publisher() as publisher:
             failed = FakeDownload(error="canceled")
@@ -82,7 +112,7 @@ class DownloadPublicationTests(unittest.TestCase):
                     pass
 
     def test_staging_cannot_be_inside_consumer_output(self):
-        with self.assertRaisesRegex(PublicationError, "disjoint"):
+        with self.assertRaisesRegex(PublicationError, "root|disjoint"):
             with DownloadPublisher(self.state, self.output, self.output / ".stage"):
                 pass
 
@@ -190,6 +220,30 @@ class DownloadPublicationTests(unittest.TestCase):
                 publisher._db.execute("SELECT status FROM documents").fetchone()[0], "published"
             )
             self.assertFalse(publisher.publish(FakeDownload(), service="portal", account="alice"))
+
+    def test_recovery_applies_shared_permissions_to_already_renamed_file(self):
+        with self.publisher() as publisher:
+            sync_directory = publisher._sync_directory
+            calls = []
+
+            def fail_after_rename(path):
+                calls.append(path)
+                if calls == [self.staging, self.output, self.staging]:
+                    raise OSError("interrupted after rename")
+                sync_directory(path)
+
+            with patch.object(publisher, "_sync_directory", side_effect=fail_after_rename):
+                with self.assertRaisesRegex(OSError, "interrupted after rename"):
+                    publisher.publish(FakeDownload(), service="portal", account="alice")
+        published = next(self.output.glob("*.pdf"))
+        self.assertEqual(stat.S_IMODE(published.stat().st_mode), 0o600)
+        with DownloadPublisher(self.state, self.output, self.staging,
+                               shared_gid=os.getgid()) as publisher:
+            self.assertEqual(
+                publisher._db.execute("SELECT status FROM documents").fetchone()[0],
+                "published",
+            )
+        self.assertEqual(stat.S_IMODE(published.stat().st_mode), 0o640)
 
     def test_recovers_prepared_stage_after_crash_before_rename(self):
         with self.publisher() as publisher:

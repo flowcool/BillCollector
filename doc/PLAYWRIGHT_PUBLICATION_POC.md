@@ -14,6 +14,32 @@ single host mount. Its old `apps/Downloads` bind is deliberately removed on
 this Playwright branch; an operator must explicitly point the DMS to the new
 `output/` before any deployment. Never silently repoint a live consumer.
 
+The image runs as the dedicated non-root UID/GID `5678:5678`. The wrapper
+overrides this with the invoking host UID/GID so its private bind-mounted
+profile, database and publication paths stay writable without `chown`. The
+existing `apps/db` bind must be writable by that UID; the wrapper creates it
+privately only if it is absent. The wrapper refuses a root invoker. A direct
+container deployment must provision its
+persistent bind mounts for the selected non-root UID before launching it;
+the image's ownership does not change ownership of a mounted host directory.
+
+By default the publication root, `state/`, `staging/`, `output/`, and PDFs are
+private to the collector (`0700` directories, `0600` PDFs). For a separate DMS
+identity, opt in to a trusted shared group: set
+`BILLCOLLECTOR_HOST_SHARED_GID` to that numeric GID for `BillCollector.sh`, or
+run a direct container with that primary GID and set
+`BILLCOLLECTOR_PUBLICATION_SHARED_GID` to the same value. The publisher then
+sets the publication root to `0710`, `output/` to setgid `2770`, and published
+PDFs to `0640`; `state/` and `staging/` stay `0700`. This grants group members
+read/delete access to PDFs in `output/` without opening private state. The DMS
+must use a different UID, be a member of this group, and have execute/traverse
+access through **all host ancestors** of the publication root. Prefer a
+dedicated shared path over a home directory whose parent modes may block it.
+Group members can modify or delete output files; only a trusted DMS should
+join the group. Verify actual Paperless read/consume permissions in an isolated
+deployment before production. No host ownership or Paperless configuration is
+changed by this PR.
+
 The caller holds `DownloadPublisher(state_dir, output_dir, staging_dir)` for the
 whole account run, then calls `publish(download, service=..., account=...)` for
 each Playwright `Download`. `service` and `account` must be stable, non-secret
@@ -59,9 +85,11 @@ database or a row blindly may cause duplicate output.
 M1 propagates runner and publication failures. M2/M3 supply the stable
 Bitwarden-item account identity and profile lock; the profile and publication
 locks now span the same account run. The old direct-download path was removed.
-This integration remains offline-tested only: an actual Docker build, same-mount
-rename inside that container, browser smoke, and DMS consume test are still
-release gates. No existing Selenium dedup state is migrated or reused.
+The local synthetic browser and Docker contracts cover the non-root image,
+same-mount rename, and a separate UID in the shared group reading/removing a
+PDF while private state remains inaccessible. A real provider and the actual
+Paperless consume path remain release gates. No existing Selenium dedup state
+is migrated or reused.
 
 Offline verification:
 

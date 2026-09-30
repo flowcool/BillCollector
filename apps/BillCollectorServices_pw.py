@@ -25,6 +25,7 @@ from download_publication import DownloadPublisher, PublicationError
 logger = logging.getLogger(__name__)
 
 PUBLICATION_ROOT_ENV = "BILLCOLLECTOR_PUBLICATION_ROOT"
+PUBLICATION_SHARED_GID_ENV = "BILLCOLLECTOR_PUBLICATION_SHARED_GID"
 
 
 def publication_context():
@@ -33,7 +34,13 @@ def publication_context():
     if not configured or not Path(configured).is_absolute():
         raise PublicationError(f"{PUBLICATION_ROOT_ENV} must be an absolute persistent directory")
     root = Path(configured)
-    return DownloadPublisher(root / "state", root / "output", root / "staging")
+    raw_gid = os.environ.get(PUBLICATION_SHARED_GID_ENV)
+    if raw_gid is not None and (not raw_gid.isascii() or not raw_gid.isdecimal()
+                                or int(raw_gid) <= 0):
+        raise PublicationError(f"{PUBLICATION_SHARED_GID_ENV} must be a positive numeric GID")
+    shared_gid = int(raw_gid) if raw_gid is not None else None
+    return DownloadPublisher(root / "state", root / "output", root / "staging",
+                             shared_gid=shared_gid)
 
 def InitBrowser(p, bcs, profile_dir=None):
     """Initialize the browser with a persistent context to always open PDF externally"""

@@ -18,6 +18,13 @@ container path to survive replacement. `.dockerignore` excludes legacy
 builds. The static test checks these paths; it does not substitute for a
 Docker-engine build-context inspection before release.
 
+The image now defaults to the non-root UID/GID `5678:5678`; the wrapper runs
+with the invoking host UID/GID for writable bind mounts and refuses a root
+invoker. Direct deployments must provision the private profile mount for the
+chosen runtime UID before starting the container. Running the process as
+non-root limits container privileges; it does **not** by itself enable the
+Chromium sandbox, which remains a separate deployment/security review item.
+
 The profile root contains live authentication material: keep
 the mount private to the collector, exclude it from logs and unencrypted
 backups, and define a secure backup/retention policy before production use.
