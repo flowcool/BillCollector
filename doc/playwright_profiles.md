@@ -31,12 +31,12 @@ only if the target does not already exist. The parent of the profile root must
 also be trusted. Never place the root on the Paperless
 consume or download staging mount.
 
-This is a local, mocked prototype. It does not migrate the previous shared
-`/apps/browser/profile`, and users may need to authenticate again. A changed
-Bitwarden item name creates a new profile. It does not implement authenticated
-backup/restore or a browser integration test with a real portal. Upstream's
-The local integration branch combines this profile work with M1's error
-contract; offline tests cover failure propagation, but no real browser run
-has verified the combined path. Profile persistence cannot automate an
-out-of-band MFA approval, SMS, or email challenge; it only reuses a session
-while the portal still accepts it.
+This local branch does not migrate the previous shared `/apps/browser/profile`,
+and users may need to authenticate again. A changed Bitwarden item name creates
+a new profile. It does not implement authenticated backup/restore. A real
+Chromium smoke against a local synthetic portal now verifies a persistent
+cookie across two process runs; it does not validate any real provider. The
+synthetic cookie has an expiry (`Max-Age`): a browser session cookie without
+one was not restored after Chromium closed in this test. Profile persistence
+therefore cannot promise that a portal's session survives restart, nor automate
+an out-of-band MFA approval, SMS, or email challenge.

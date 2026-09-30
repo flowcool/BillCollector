@@ -16,6 +16,17 @@ import BillCollectorServices_pw as runner
 
 
 class RunnerContractTests(unittest.TestCase):
+    def test_run_tables_reject_untrusted_identifiers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = runner.DatabaseManager(Path(directory) / "runs.sqlite3")
+            try:
+                with self.assertRaisesRegex(ValueError, "safe database identifier"):
+                    db.create_service_run_table("demo;DROP TABLE Service")
+                with self.assertRaisesRegex(ValueError, "safe database identifier"):
+                    db.insert_page_status("PageStatus_demo_Run1;DROP", SimpleNamespace())
+            finally:
+                db.close_connection()
+
     def test_real_publisher_is_used_for_two_account_runs(self):
         pdf = b"%PDF-1.4\n%%EOF\n"
 

@@ -278,4 +278,5 @@ def index():
 
 
 if __name__ == "__main__":
-    ui.run(port=8000, host="0.0.0.0", title="BillCollector", show=False, reload=False)
+    # The prototype UI has no authentication; never expose it on the network.
+    ui.run(port=8000, host="127.0.0.1", title="BillCollector", show=False, reload=False)

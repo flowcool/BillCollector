@@ -73,21 +73,18 @@ class DatabaseManager:
 
     def create_service_run_table(self, service_name):
         """Creates a new run table for a service and registers it in the Service table."""
+        if not isinstance(service_name, str) or not re.fullmatch(r"[a-z0-9_]+", service_name):
+            raise ValueError("Service name is not a safe database identifier")
         run_number = self.get_latest_run_number(service_name) + 1
         run_id = f"{service_name}_Run{run_number}"
         table_name = f"PageStatus_{run_id}"
 
         # Create the service run table
-        self.cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            service_name TEXT NOT NULL,
-            step_number INTEGER NOT NULL,
-            locator_action JSON,
-            interactive_elements JSON,
-            result JSON
-        );
-        """)
+        # SQLite cannot bind identifiers; service and run number are constrained above.
+        self.cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, service_name TEXT NOT NULL, "
+            "step_number INTEGER NOT NULL, locator_action JSON, "
+            "interactive_elements JSON, result JSON)")
 
         # Get the local timestamp
         local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -109,12 +106,15 @@ class DatabaseManager:
 
     def insert_page_status(self, table_name, page_state):
         """Stores a PageState entry in the correct service run table."""
-        self.cursor.execute(f"""
-        INSERT INTO {table_name} (
-            service_name, step_number, locator_action, interactive_elements, result
-        ) 
-        VALUES (?, ?, ?, ?, ?)
-        """, (
+        if not isinstance(table_name, str) or not re.fullmatch(
+            r"PageStatus_[a-z0-9_]+_Run[1-9][0-9]*", table_name
+        ):
+            raise ValueError("Run table is not a safe database identifier")
+        # SQLite cannot bind identifiers; the strict pattern rejects SQL syntax.
+        self.cursor.execute(
+            f"INSERT INTO {table_name} "  # nosec B608
+            "(service_name, step_number, locator_action, interactive_elements, result) "
+            "VALUES (?, ?, ?, ?, ?)", (
             page_state.service_name,
             page_state.step_number,
             json.dumps(page_state.locator_action),  # Stores locator and action information

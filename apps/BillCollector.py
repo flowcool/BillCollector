@@ -71,7 +71,7 @@ def is_domain_local_ip(domain, try_count=3):
 # Get web content
 def get_json(url):
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
         if 400 <= response.status_code < 500:
@@ -125,7 +125,11 @@ def is_string_valid(string):
         return False
     
 def post_json(url, payload):
-    response = requests.post(url, json=payload)
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+    except requests.exceptions.RequestException:
+        logger.error("Vault request failed")
+        return False
     if response.status_code == 201 or response.status_code == 200:
         logger.info("Successfully posted!")
         return json.dumps(response.json())
