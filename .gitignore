@@ -1,5 +1,6 @@
 .env
 .venv
+.code
 chrome*
 .pytest*
 __pycache__
@@ -9,3 +10,4 @@ __pycache__
 Downloads
 browser/
 db/
+.bc_ui_run.json
