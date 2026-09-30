@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import json
 import sys
+from pathlib import Path
 
 from datetime import datetime
 from playwright.sync_api import Playwright, sync_playwright, Route, Request, Page
@@ -19,8 +20,20 @@ from helpers.BillCollectorRecipeContract import (
     load_playwright_recipe,
 )
 from profile_store import locked_profile
+from download_publication import DownloadPublisher, PublicationError
 
 logger = logging.getLogger(__name__)
+
+PUBLICATION_ROOT_ENV = "BILLCOLLECTOR_PUBLICATION_ROOT"
+
+
+def publication_context():
+    """Require one persistent mount for state, private stage and consumer output."""
+    configured = os.environ.get(PUBLICATION_ROOT_ENV, "")
+    if not configured or not Path(configured).is_absolute():
+        raise PublicationError(f"{PUBLICATION_ROOT_ENV} must be an absolute persistent directory")
+    root = Path(configured)
+    return DownloadPublisher(root / "state", root / "output", root / "staging")
 
 def InitBrowser(p, bcs, profile_dir=None):
     """Initialize the browser with a persistent context to always open PDF externally"""
@@ -163,9 +176,6 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *
 
     bcs = ServiceObj(service=service, usr=user, pwd=pwd, otp=otp, dbg=debug, dld=DOWNLOAD_DIR,
                      account_id=account_id)
-    if not os.path.exists(bcs.dld):
-        os.makedirs(bcs.dld)
-    
     on_debug_start_keyboard_listener(bcs)
     try:
         bcs.yml = load_playwright_recipe(service)
@@ -173,7 +183,8 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *
         bcs.allowed_recipe_origins = external_recipe_origins() if bcs.external_recipe else None
         
         file_downloaded = perform_actions(bcs)
-        logger.info("Service %s finished; downloads: %d", service, len(file_downloaded))
+        logger.info("Service %s finished; published: %d", service,
+                    sum(item["result"] == "published" for item in file_downloaded))
         on_debug_stop_keyboard_listener(bcs)
         return True
     except Exception:
@@ -184,7 +195,7 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *
 def perform_actions(bcs):
     """Perform actions from YAML recipe on web elements - helper function for dispatching actions"""
     files_downloaded = []
-    with sync_playwright() as p, locked_profile(CHROMIUM_PLAYWRIGHT_PROFILE, bcs.account_id) as profile_dir:
+    with sync_playwright() as p, locked_profile(CHROMIUM_PLAYWRIGHT_PROFILE, bcs.account_id) as profile_dir, publication_context() as publisher:
         try:
             bcs.drv = InitBrowser(p, bcs, profile_dir)
             bcs.page = bcs.drv.new_page()
@@ -216,11 +227,11 @@ def perform_actions(bcs):
                                         if nested_state.error_status:
                                             raise RuntimeError(f"Nested step {nested_step.get('step', 0)} failed")
                                 download = di.value
-                                filepath = os.path.join(DOWNLOAD_DIR, str(download.suggested_filename))
-                                download.save_as(filepath)
+                                published = publisher.publish(download, service=bcs.service,
+                                                              account=bcs.account_id)
                             except Exception:
                                 raise RuntimeError("Download step failed") from None
-                            service_files.append({"result": "success"})
+                            service_files.append({"result": "published" if published else "duplicate"})
                     run_result = "success"
                     files_downloaded.extend(service_files)
                 finally:

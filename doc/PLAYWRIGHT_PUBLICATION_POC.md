@@ -1,7 +1,18 @@
 # Playwright publication proof of concept (M4)
 
-`apps/download_publication.py` is an offline, standard-library-only seam. It is
-not connected to the current runner or a production deployment.
+`apps/download_publication.py` is a standard-library-only publication seam.
+The local Playwright runner now holds it for the entire account run and routes
+each completed download through it. This is not a production deployment.
+
+`BILLCOLLECTOR_PUBLICATION_ROOT` is required and must be an absolute path to a
+persistent, private root. The runner creates `state/`, `staging/`, and `output/`
+under this one root. Mount the **root once**; do not bind-mount the children
+separately. Watch only `output/` with the downstream consumer. The wrapper
+`BillCollector.sh` uses `BILLCOLLECTOR_HOST_PUBLICATION_DIR` (default
+`${XDG_STATE_HOME:-$HOME/.local/state}/billcollector/publication`) as that
+single host mount. Its old `apps/Downloads` bind is deliberately removed on
+this Playwright branch; an operator must explicitly point the DMS to the new
+`output/` before any deployment. Never silently repoint a live consumer.
 
 The caller holds `DownloadPublisher(state_dir, output_dir, staging_dir)` for the
 whole account run, then calls `publish(download, service=..., account=...)` for
@@ -45,12 +56,12 @@ DMS-specific API, receipt, or retry policy is included. A manual recovery
 decision needs external evidence of whether the PDF was consumed; deleting the
 database or a row blindly may cause duplicate output.
 
-This module remains unconnected to the runner even in the local integration
-branch. M1 now propagates runner failures, but its direct-download path has not
-been replaced. M2/M3 supply a candidate stable account identity and profile
-lock; the publication lock and profile lock still need a single run-lifetime
-contract. A deployment change must provide the common mount with private
-staging outside the watched output tree.
+M1 propagates runner and publication failures. M2/M3 supply the stable
+Bitwarden-item account identity and profile lock; the profile and publication
+locks now span the same account run. The old direct-download path was removed.
+This integration remains offline-tested only: an actual Docker build, same-mount
+rename inside that container, browser smoke, and DMS consume test are still
+release gates. No existing Selenium dedup state is migrated or reused.
 
 Offline verification:
 

@@ -1,7 +1,7 @@
 """Local, DMS-agnostic publication of completed Playwright downloads.
 
-Integration boundary: hold a DownloadPublisher context for the *entire* account
-run and call publish() for each Playwright Download. The state and staging
+The Playwright runner holds a DownloadPublisher context for the *entire* account
+run and calls publish() for each Playwright Download. The state and staging
 directories must be persistent and private; output_dir is the directory
 consumed by the downstream DMS. Staging must be a sibling on the *same mount*,
 outside the consumer's watched tree. No browser, recipe, scheduler, or Paperless

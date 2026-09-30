@@ -16,6 +16,62 @@ import BillCollectorServices_pw as runner
 
 
 class RunnerContractTests(unittest.TestCase):
+    def test_real_publisher_is_used_for_two_account_runs(self):
+        pdf = b"%PDF-1.4\n%%EOF\n"
+
+        class FakeDownload:
+            body = pdf
+
+            def failure(self):
+                return None
+
+            def save_as(self, path):
+                Path(path).write_bytes(self.body)
+
+            @property
+            def suggested_filename(self):
+                raise AssertionError("Untrusted filename must not be read")
+
+        browser = MagicMock()
+        page = browser.new_page.return_value
+        page.expect_download.return_value.__enter__.return_value.value = FakeDownload()
+        outer = {"step": 1, "steps": [{"step": 2}]}
+        recipe = {"services": [{"serviceName": "demo", "steps": [outer]}]}
+
+        def step_state(_bcs, step):
+            action = '{"action":"expect_download"}' if step is outer else "{}"
+            return SimpleNamespace(service_name="demo", step_number=step["step"],
+                                   locator_action=action, interactive_elements=[], error_status=None)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(os.environ, {"BILLCOLLECTOR_PUBLICATION_ROOT": str(root / "publication")}), \
+                 patch.object(runner, "DB_FILE", str(root / "runs.sqlite3")), \
+                 patch.object(runner, "sync_playwright"), \
+                 patch.object(runner, "locked_profile", return_value=nullcontext(str(root / "profile"))), \
+                 patch.object(runner, "InitBrowser", return_value=browser), \
+                 patch.object(runner, "process_step", side_effect=step_state):
+                first = runner.perform_actions(SimpleNamespace(yml=recipe, service="demo",
+                    account_id="demo alice", db=None, page=None, drv=None))
+                second = runner.perform_actions(SimpleNamespace(yml=recipe, service="demo",
+                    account_id="demo alice", db=None, page=None, drv=None))
+                broken = FakeDownload()
+                broken.body = b"<html>not an invoice</html>"
+                page.expect_download.return_value.__enter__.return_value.value = broken
+                with self.assertRaisesRegex(RuntimeError, "Download step failed"):
+                    runner.perform_actions(SimpleNamespace(yml=recipe, service="demo",
+                        account_id="demo alice", db=None, page=None, drv=None))
+            self.assertEqual(first, [{"result": "published"}])
+            self.assertEqual(second, [{"result": "duplicate"}])
+            self.assertEqual(len(list((root / "publication" / "output").glob("*.pdf"))), 1)
+            self.assertEqual(list((root / "publication" / "staging").iterdir()), [])
+            connection = sqlite3.connect(root / "runs.sqlite3")
+            try:
+                self.assertEqual(connection.execute(
+                    "SELECT result FROM Service ORDER BY id DESC LIMIT 1").fetchone()[0], "failure")
+            finally:
+                connection.close()
+
     def test_page_state_does_not_persist_dom_or_recipe_secrets(self):
         secret = "SENTINEL_PRIVATE_VALUE"
         page = MagicMock()
@@ -65,6 +121,7 @@ class RunnerContractTests(unittest.TestCase):
                               usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright") as pw, \
              patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
+             patch.object(runner, "publication_context", return_value=nullcontext(MagicMock())), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db), \
              patch.object(runner, "process_step", return_value=SimpleNamespace(error_status={"error": "failed"})):
@@ -84,6 +141,7 @@ class RunnerContractTests(unittest.TestCase):
                               usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright"), \
              patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
+             patch.object(runner, "publication_context", return_value=nullcontext(MagicMock())), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db):
             self.assertEqual(runner.perform_actions(bcs), [])
@@ -108,6 +166,7 @@ class RunnerContractTests(unittest.TestCase):
         bcs = SimpleNamespace(yml={"services": []}, usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright", return_value=PlaywrightContext()), \
              patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
+             patch.object(runner, "publication_context", return_value=nullcontext(MagicMock())), \
              patch.object(runner, "InitBrowser", return_value=browser):
             self.assertEqual(runner.perform_actions(bcs), [])
         self.assertEqual(lifecycle, ["start", "page closed", "browser closed", "stop"])
@@ -121,6 +180,7 @@ class RunnerContractTests(unittest.TestCase):
                               usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright"), \
              patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
+             patch.object(runner, "publication_context", return_value=nullcontext(MagicMock())), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db), \
              patch.object(runner, "process_step", side_effect=ValueError("private data")):
@@ -139,6 +199,7 @@ class RunnerContractTests(unittest.TestCase):
                               usr="user", account_id="demo user", db=None, page=None, drv=None)
         with patch.object(runner, "sync_playwright"), \
              patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
+             patch.object(runner, "publication_context", return_value=nullcontext(MagicMock())), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db), \
              patch.object(runner, "process_step", side_effect=ValueError("private data")):
@@ -198,6 +259,7 @@ class RunnerContractTests(unittest.TestCase):
         db = MagicMock()
         with patch.object(runner, "sync_playwright"), \
              patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
+             patch.object(runner, "publication_context", return_value=nullcontext(MagicMock())), \
              patch.object(runner, "InitBrowser", return_value=browser), \
              patch.object(runner, "DatabaseManager", return_value=db):
             with self.assertRaisesRegex(RuntimeError, "Playwright service run failed"):

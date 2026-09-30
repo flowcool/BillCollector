@@ -110,10 +110,12 @@ class ProfileStoreTests(unittest.TestCase):
         playwright_context.__exit__ = Mock(return_value=False)
         account = SimpleNamespace(yml={"services": []}, dbg=False, account_id="Portal account-A")
 
-        with patch.object(services, "sync_playwright", return_value=playwright_context), \
-             patch.object(services, "InitBrowser", return_value=browser), \
-             patch.object(services, "locked_profile", return_value=nullcontext("/tmp/mock-profile")):
-            self.assertEqual(services.perform_actions(account), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"BILLCOLLECTOR_PUBLICATION_ROOT": str(Path(tmp) / "publication")}), \
+                 patch.object(services, "sync_playwright", return_value=playwright_context), \
+                 patch.object(services, "InitBrowser", return_value=browser), \
+                 patch.object(services, "locked_profile", return_value=nullcontext("/tmp/mock-profile")):
+                self.assertEqual(services.perform_actions(account), [])
 
         browser.new_page.return_value.context.clear_cookies.assert_not_called()
 
@@ -138,7 +140,8 @@ class ProfileStoreTests(unittest.TestCase):
             playwright_context = Mock()
             playwright_context.__enter__ = Mock(return_value=playwright)
             playwright_context.__exit__ = Mock(return_value=False)
-            with patch.object(services, "CHROMIUM_PLAYWRIGHT_PROFILE", str(root)), \
+            with patch.dict(os.environ, {"BILLCOLLECTOR_PUBLICATION_ROOT": str(Path(tmp) / "publication")}), \
+                 patch.object(services, "CHROMIUM_PLAYWRIGHT_PROFILE", str(root)), \
                  patch.object(services, "sync_playwright", return_value=playwright_context):
                 with self.assertRaisesRegex(RuntimeError, "Playwright service run failed"):
                     services.perform_actions(account)
@@ -165,7 +168,8 @@ class ProfileStoreTests(unittest.TestCase):
             playwright_context = Mock()
             playwright_context.__enter__ = Mock(return_value=playwright)
             playwright_context.__exit__ = Mock(return_value=False)
-            with patch.object(services, "CHROMIUM_PLAYWRIGHT_PROFILE", str(root)), \
+            with patch.dict(os.environ, {"BILLCOLLECTOR_PUBLICATION_ROOT": str(Path(tmp) / "publication")}), \
+                 patch.object(services, "CHROMIUM_PLAYWRIGHT_PROFILE", str(root)), \
                  patch.object(services, "sync_playwright", return_value=playwright_context):
                 self.assertEqual(services.perform_actions(account), [])
             browser.close.assert_called_once()
