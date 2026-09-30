@@ -1,5 +1,6 @@
 """Offline publication contract tests; no browser, portal, or DMS required."""
 
+import errno
 import hashlib
 import os
 import sqlite3
@@ -118,6 +119,24 @@ class DownloadPublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(PublicationError, "ambiguous"):
             with self.publisher():
                 pass
+
+    def test_cross_mount_rename_failure_never_marks_published(self):
+        with self.publisher() as publisher:
+            with patch("download_publication.os.replace", side_effect=OSError(errno.EXDEV, "cross-device link")):
+                with self.assertRaises(OSError) as error:
+                    publisher.publish(FakeDownload(), service="portal", account="alice")
+            self.assertEqual(error.exception.errno, errno.EXDEV)
+            status, stage_name = publisher._db.execute(
+                "SELECT status, stage_name FROM documents"
+            ).fetchone()
+            self.assertEqual(status, "renaming")
+            self.assertTrue((self.staging / stage_name).exists())
+            self.assertEqual(list(self.output.iterdir()), [])
+        with self.assertRaisesRegex(PublicationError, "ambiguous"):
+            with self.publisher():
+                pass
+        with closing(sqlite3.connect(self.state / "publication.sqlite3")) as db:
+            self.assertEqual(db.execute("SELECT status FROM documents").fetchone()[0], "renaming")
 
     def test_rename_syncs_both_directories_before_marking_published(self):
         with self.publisher() as publisher:
