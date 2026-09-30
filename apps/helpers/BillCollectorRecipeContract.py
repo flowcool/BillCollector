@@ -68,6 +68,33 @@ class RecipeContractError(ValueError):
     """A recipe is unavailable or outside the supported execution contract."""
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects ambiguous mapping keys."""
+
+
+def _construct_unique_mapping(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as exc:
+            raise yaml.constructor.ConstructorError(
+                None, None, "unhashable mapping key", key_node.start_mark
+            ) from exc
+        if duplicate:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"duplicate mapping key {key!r}", key_node.start_mark
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
+)
+
+
 def https_origin(url):
     """Return the exact HTTPS origin of a URL, or None if it is not usable."""
     try:
@@ -218,7 +245,11 @@ def load_playwright_recipe(service_name, recipe_dir=None, *, allowed_origins=Non
         raw_recipe = recipe_path.read_bytes()
         if expected_sha256 is not None and hashlib.sha256(raw_recipe).hexdigest() != expected_sha256:
             raise RecipeContractError("recipe bytes differ from operator-approved SHA-256")
-        recipe = yaml.safe_load(raw_recipe)
+        loader = _UniqueKeyLoader(raw_recipe)
+        try:
+            recipe = loader.get_single_data()
+        finally:
+            loader.dispose()
         with open(RECIPES_PLAYWRIGHT_SCHEMA_FILE, encoding="utf-8") as stream:
             schema = yaml.safe_load(stream)
         validate(instance=recipe, schema=schema)

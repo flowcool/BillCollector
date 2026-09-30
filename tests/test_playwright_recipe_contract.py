@@ -129,6 +129,40 @@ class RecipeContractTests(unittest.TestCase):
             }):
                 self.assertEqual(load_playwright_recipe("sample")["formatVersion"], 1)
 
+    def test_external_recipe_rejects_duplicate_yaml_keys_before_approval(self):
+        original = yaml.safe_dump(VALID_RECIPE)
+        cases = {
+            "top_level": original.replace(
+                "formatVersion: 1", "formatVersion: 1\nformatVersion: 1", 1
+            ),
+            "nested": original.replace(
+                "serviceName: sample", "serviceName: sample\n  serviceName: sample", 1
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recipes = root / "recipes"
+            recipes.mkdir()
+            recipe_path = recipes / "recipe-pw__sample.yaml"
+            approval_path = root / "approvals.json"
+            for name, raw_recipe in cases.items():
+                with self.subTest(name=name):
+                    recipe_path.write_text(raw_recipe, encoding="utf-8")
+                    approval_path.write_text(json.dumps({
+                        "formatVersion": 1,
+                        "accounts": {"sample alice": {
+                            "service": "sample",
+                            "sha256": hashlib.sha256(recipe_path.read_bytes()).hexdigest(),
+                            "origins": ["https://example.test"],
+                        }},
+                    }), encoding="utf-8")
+                    with patch.dict(os.environ, {
+                        "BILLCOLLECTOR_RECIPES_DIR": str(recipes),
+                        "BILLCOLLECTOR_RECIPE_APPROVALS_FILE": str(approval_path),
+                        "BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS": "https://example.test",
+                    }), self.assertRaisesRegex(RecipeContractError, "invalid YAML recipe"):
+                        preflight_external_recipe("sample", "sample alice")
+
     def test_external_directory_is_authoritative(self):
         with tempfile.TemporaryDirectory() as recipe_dir:
             with patch.dict(os.environ, {
