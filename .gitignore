@@ -9,5 +9,6 @@ __pycache__
 *.html
 Downloads
 browser/
+/apps/profiles/
 db/
 .bc_ui_run.json

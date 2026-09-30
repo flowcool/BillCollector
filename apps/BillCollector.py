@@ -208,7 +208,10 @@ def WebRetriDoc(self, type=None, service=None):
 
                 # Download Documents with the help of the appropriate automation library
                 if automation_library.lower() == "playwright":
-                    if not retrieve_from_service_with_playwright(servicename, uri, username, passsword, totp, self.debug):
+                    if not retrieve_from_service_with_playwright(
+                        servicename, uri, username, passsword, totp, self.debug,
+                        account_id=service_user,
+                    ):
                         failed = True
     #
     #################

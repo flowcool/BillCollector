@@ -1,5 +1,4 @@
 import os
-import shutil
 import re
 import inspect
 import logging
@@ -19,17 +18,17 @@ from helpers.BillCollectorRecipeContract import (
     https_origin,
     load_playwright_recipe,
 )
+from profile_store import prepare_profile
 
 logger = logging.getLogger(__name__)
 
 def InitBrowser(p, bcs):
     """Initialize the browser with a persistent context to always open PDF externally"""
     try:
-        if not init_browser_profile():
-            raise Exception("Failed to initialize browser profile.")
+        profile_dir = prepare_profile(CHROMIUM_PLAYWRIGHT_PROFILE, bcs.account_id)
         browser = p.chromium.launch_persistent_context(
             headless=not bcs.dbg,
-            user_data_dir=CHROMIUM_PLAYWRIGHT_PROFILE,
+            user_data_dir=profile_dir,
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                      (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             )
@@ -37,24 +36,6 @@ def InitBrowser(p, bcs):
         logger.error("Browser initialization failed")
         return None
     return browser
-
-def init_browser_profile():
-    """Initialize the browser profile for Playwright Chromium."""
-    # https://www.chromium.org/administrators/configuring-other-preferences/
-    # https://support.google.com/chrome/a/answer/187948?sjid=14232849532875888309-EU
-    # The following has not worked for me: https://github.com/microsoft/playwright/issues/7822
-    try:
-        if os.path.exists(CHROMIUM_PLAYWRIGHT_PROFILE):
-            shutil.rmtree(CHROMIUM_PLAYWRIGHT_PROFILE)  # Remove existing profile directory
-        os.makedirs(os.path.join(CHROMIUM_PLAYWRIGHT_PROFILE, "Default"), exist_ok=True)  # Create a new profile directory
-        content = {"plugins": {"always_open_pdf_externally": True}} # Set the preference to always open PDFs externally
-        with open(os.path.join(CHROMIUM_PLAYWRIGHT_PROFILE, "Default", "Preferences"), "w", encoding="utf-8") as f:
-            json.dump(content, f, indent=2)
-    except Exception as e:
-        logger.error(f"Error initializing browser profile: {e}")
-        return False
-    else:
-        return True
 
 class DatabaseManager:
     """Manages service-specific and run-specific tables."""
@@ -381,10 +362,11 @@ class PageState:
         
         return results
 
-def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug):
+def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *, account_id):
     """Retrieve file from service - main function - Playwright variant    """
 
-    bcs = ServiceObj(service=service, usr=user, pwd=pwd, otp=otp, dbg=debug, dld=DOWNLOAD_DIR)
+    bcs = ServiceObj(service=service, usr=user, pwd=pwd, otp=otp, dbg=debug, dld=DOWNLOAD_DIR,
+                     account_id=account_id)
     if not os.path.exists(bcs.dld):
         os.makedirs(bcs.dld)
     
@@ -412,7 +394,6 @@ def perform_actions(bcs):
             if bcs.drv is None:
                 raise RuntimeError("Browser initialization failed")
             bcs.page = bcs.drv.new_page()
-            bcs.page.context.clear_cookies()
             
             # Parse the YAML structure
             services = bcs.yml.get('services', [])
