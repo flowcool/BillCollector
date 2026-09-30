@@ -282,8 +282,12 @@ class RecipeContractTests(unittest.TestCase):
             with self.assertRaisesRegex(RecipeContractError, "credential fill blocked"):
                 process_step(bcs, step)
             locator.fill.assert_not_called()
-            page.url = "https://example.test/login"
+            page.url = "https://example.test:443/login"
             process_step(bcs, step)
+            locator.fill.assert_called_once_with(value="secret")
+            page.url = "https://example.test:8443/login"
+            with self.assertRaisesRegex(RecipeContractError, "credential fill blocked"):
+                process_step(bcs, step)
             locator.fill.assert_called_once_with(value="secret")
 
     def test_name_and_symlink_cannot_escape_directory(self):

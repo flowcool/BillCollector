@@ -237,6 +237,12 @@ def WebRetriDoc(self, type=None, service=None):
         return False
     return not failed
 
+
+def playwright_exit_code(config, service=None):
+    """Return the CLI status for a selected Playwright run."""
+    return 0 if WebRetriDoc(config, "playwright", service) else 1
+
+
 if __name__ == "__main__":
     sys.stdout = sys.__stdout__
 
@@ -280,4 +286,4 @@ if __name__ == "__main__":
 
     setup_logging(LOG_DEFAULT_FILE, debug=bc.debug)
 
-    sys.exit(0 if WebRetriDoc(bc, "playwright", service) else 1)
+    sys.exit(playwright_exit_code(bc, service))

@@ -233,6 +233,27 @@ class RunnerContractTests(unittest.TestCase):
                 self.assertFalse(BillCollector.WebRetriDoc(config, "playwright"))
             self.assertEqual(retrieve.call_count, 2)
 
+    def test_no_matching_service_returns_nonzero_cli_status(self):
+        cases = (
+            ("[Playwright]\ndemo = alice\n", "missing"),
+            ("[Playwright]\n", None),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            ini = Path(directory) / "services.ini"
+            config = BillCollector.defs("vault.local", "http://vault.local", fname=str(ini))
+            for contents, service in cases:
+                with self.subTest(service=service):
+                    ini.write_text(contents, encoding="utf-8")
+                    with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+                         patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
+                         patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
+                         patch.object(BillCollector, "is_json_property_value", return_value=True), \
+                         patch.object(BillCollector, "get_json") as vault_lookup, \
+                         patch.object(BillCollector, "retrieve_from_service_with_playwright") as browser_run:
+                        self.assertEqual(BillCollector.playwright_exit_code(config, service), 1)
+                        vault_lookup.assert_not_called()
+                        browser_run.assert_not_called()
+
     def test_profile_startup_failure_reaches_cli_caller(self):
         with tempfile.TemporaryDirectory() as directory:
             ini = os.path.join(directory, "services.ini")
