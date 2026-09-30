@@ -56,4 +56,36 @@ if [[ -n "${BILLCOLLECTOR_HOST_SHARED_GID:-}" ]]; then
     DOCKER_ARGS+=(-e "BILLCOLLECTOR_PUBLICATION_SHARED_GID=$HOST_RUN_GID")
 fi
 
+# External recipes are opt-in. The recipe directory and the operator approval
+# file are mounted read-only from separate host locations (see
+# doc/playwright-external-recipes.md); the origin ceiling must be set explicitly.
+if [[ -n "${BILLCOLLECTOR_HOST_RECIPES_DIR:-}" ]]; then
+    HOST_APPROVALS="${BILLCOLLECTOR_HOST_RECIPE_APPROVALS_FILE:-}"
+    if [[ -L "$BILLCOLLECTOR_HOST_RECIPES_DIR" || ! -d "$BILLCOLLECTOR_HOST_RECIPES_DIR" ]]; then
+        echo "BILLCOLLECTOR_HOST_RECIPES_DIR must be a real directory" >&2
+        exit 1
+    fi
+    if [[ -z "$HOST_APPROVALS" || -L "$HOST_APPROVALS" || ! -f "$HOST_APPROVALS" ]]; then
+        echo "BILLCOLLECTOR_HOST_RECIPE_APPROVALS_FILE must be a regular file (not a symlink)" >&2
+        exit 1
+    fi
+    if [[ -z "${BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS:-}" ]]; then
+        echo "BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS is required with external recipes" >&2
+        exit 1
+    fi
+    HOST_RECIPES_REAL="$(readlink -f "$BILLCOLLECTOR_HOST_RECIPES_DIR")"
+    HOST_APPROVALS_REAL="$(readlink -f "$HOST_APPROVALS")"
+    if [[ "$HOST_APPROVALS_REAL" == "$HOST_RECIPES_REAL"/* ]]; then
+        echo "The approval file must be outside the recipe directory" >&2
+        exit 1
+    fi
+    DOCKER_ARGS+=(
+        -v "$HOST_RECIPES_REAL:/recipes:ro"
+        -v "$HOST_APPROVALS_REAL:/approvals/recipe-approvals.json:ro"
+        -e BILLCOLLECTOR_RECIPES_DIR=/recipes
+        -e BILLCOLLECTOR_RECIPE_APPROVALS_FILE=/approvals/recipe-approvals.json
+        -e "BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS=$BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS"
+    )
+fi
+
 docker run "${DOCKER_ARGS[@]}" --rm billcollector:latest python3 ./BillCollector.py "$@"

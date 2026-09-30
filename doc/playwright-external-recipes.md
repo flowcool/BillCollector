@@ -84,6 +84,12 @@ the runtime checks the current top-level page origin against the same list.
 Missing or malformed origin configuration stops an external recipe before the
 browser opens. Bundled recipes retain their original HTTP(S) URL behavior.
 
+`BillCollector.sh` forwards external recipes when `BILLCOLLECTOR_HOST_RECIPES_DIR`,
+`BILLCOLLECTOR_HOST_RECIPE_APPROVALS_FILE` (a regular file outside that directory)
+and `BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS` are all set. It mounts the first two
+read-only at `/recipes` and `/approvals/recipe-approvals.json` and sets the matching
+container variables; with the first variable unset, bundled recipes are used.
+
 This is an operator-review gate, **not** a sandbox for untrusted YAML. A recipe
 can still click through to another origin, trigger a redirect, operate on a
 compromised allowed page, or cause a page to send entered credentials elsewhere.
