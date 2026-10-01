@@ -78,12 +78,13 @@ class RecipeContractTests(unittest.TestCase):
                 self.assertEqual(recipe["formatVersion"], 1)
                 self.assertEqual(origins, ALLOWED_ORIGINS)
                 config = BillCollector.defs("vault.local", "http://vault.local", fname=str(ini))
-                with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+                with patch.object(BillCollector, "is_api_url_local", return_value=True), \
                      patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
                      patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
                      patch.object(BillCollector, "is_json_property_value", return_value=True), \
-                     patch.object(BillCollector, "get_json", return_value='{"data":{}}'), \
-                     patch.object(BillCollector, "get_json_property_value", return_value="placeholder"), \
+                     patch.object(BillCollector, "get_item_by_name", return_value={"id": "item-id", "login": {
+                         "username": "alice", "password": "password", "uris": [{"uri": "https://example.test"}]}}), \
+                     patch.object(BillCollector, "get_totp", return_value=None), \
                      patch.object(BillCollector, "retrieve_from_service_with_playwright", return_value=True) as run:
                     self.assertTrue(BillCollector.WebRetriDoc(config, "playwright"))
                     self.assertEqual(run.call_args.kwargs["recipe_preflight"], (recipe, origins))
@@ -92,11 +93,11 @@ class RecipeContractTests(unittest.TestCase):
                 recipe_path.write_text(recipe_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
                 with self.assertRaisesRegex(RecipeContractError, "differ"):
                     preflight_external_recipe("sample", "sample alice")
-                with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+                with patch.object(BillCollector, "is_api_url_local", return_value=True), \
                      patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
                      patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
                      patch.object(BillCollector, "is_json_property_value", return_value=True), \
-                     patch.object(BillCollector, "get_json") as vault_lookup:
+                     patch.object(BillCollector, "get_item_by_name") as vault_lookup:
                     self.assertFalse(BillCollector.WebRetriDoc(config, "playwright"))
                     vault_lookup.assert_not_called()
 

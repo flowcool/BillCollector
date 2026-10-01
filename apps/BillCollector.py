@@ -3,10 +3,11 @@
 
 import os
 import sys
+import ipaddress
+import socket
+from urllib.parse import quote, urlparse
 from dotenv import load_dotenv
 import re
-from nslookup import Nslookup
-import time
 import logging
 import requests
 import json
@@ -19,6 +20,11 @@ from helpers import *
 
 logger = logging.getLogger(__name__)
 
+LOCAL_API_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    "127.0.0.0/8", "fc00::/7", "::1/128",
+))
+
 # Function to extract strings before and within brackets
 def extract_strings(line):
     match = re.search(r'([^\[]*)\[(.*?)\]', line)
@@ -28,72 +34,46 @@ def extract_strings(line):
         return before_bracket, within_bracket
     return line.strip(), []
 
-def extract_ip(string):
-    # Regex for IP addresses
-    ip_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
-    match = ip_pattern.search(string)
-    if match:
-        return match.group()
-    return None
+def is_api_url_local(url):
+    """Require every resolved bw serve address to be private or loopback."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+        addresses = {info[4][0] for info in socket.getaddrinfo(parsed.hostname, parsed.port)}
+        return bool(addresses) and all(
+            any(ipaddress.ip_address(address) in network for network in LOCAL_API_NETWORKS)
+            for address in addresses
+        )
+    except (OSError, TypeError, ValueError):
+        return False
 
-def is_local_ip(ip):
-    # Local IP ranges
-    local_ip_ranges = [
-        re.compile(r'^10\.'),  # 10.0.0.0 - 10.255.255.255
-        re.compile(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.'),  # 172.16.0.0 - 172.31.255.255
-        re.compile(r'^192\.168\.'),  # 192.168.0.0 - 192.168.255.255
-    ]
-    for pattern in local_ip_ranges:
-        if pattern.match(ip):
-            return True
-    return False
 
-# Check DNS for domain is directing to local IP
-def is_domain_local_ip(domain, try_count=3):
-    dns_query = Nslookup()
-    for attempt in range(1, try_count + 1):
-        try:
-            ips_record = dns_query.dns_lookup(domain)
-            ip = extract_ip(' '.join(ips_record.answer))
-            if ip:
-                if is_local_ip(ip):
-                    return ip
-                else:
-                    logger.error("No local IP address.")
-                    return False
-            else:
-                logger.warning(f"No IP address received on attempt {attempt}.")
-        except Exception as e:
-            logger.warning(f"DNS Exception on attempt {attempt}: {e}")
-        finally:
-            time.sleep(1)
+def bitwarden_api_headers():
+    host = os.getenv("BW_API_HOST", "").strip()
+    return {"Host": host} if host else None
+
 
 # Get web content
 def get_json(url):
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, headers=bitwarden_api_headers(), timeout=10,
+                                allow_redirects=False)
+        if response.status_code not in (200, 201):
+            logger.error("Vault request failed (%s)", response.status_code)
+            return None
         response.raise_for_status()
-    except requests.exceptions.HTTPError as e:
-        if 400 <= response.status_code < 500:
-            if "No TOTP" in response.text: 
-                pass
-            else: 
-                logger.error("Vault client error: HTTP %s", response.status_code)
-                sys.exit(1)
-        else: 
-            logger.error(f"Error with request: {e}")
-            sys.exit(1)
-    except (requests.exceptions.ConnectionError, 
-            requests.exceptions.Timeout, 
-            requests.exceptions.RequestException) as e:
-        logger.error(f"Error with request: {e}")
-        sys.exit(1)
-    else:
         return response.text
+    except requests.exceptions.RequestException as error:
+        status = error.response.status_code if error.response is not None else "network"
+        logger.error("Vault request failed (%s)", status)
+        return None
 
 # Check Bitwarden API status
 def bitwarden_api_check_status(url):
     content = get_json(f"{url}/status")
+    if content is None:
+        return False, None
     if not is_json_property_value(content, "success", True): return False, None
     else: 
         if not is_json_property_value(content, "data_template_status", "unlocked"): return True, "locked"
@@ -126,11 +106,13 @@ def is_string_valid(string):
     
 def post_json(url, payload):
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, headers=bitwarden_api_headers(), timeout=10,
+                                 allow_redirects=False)
     except requests.exceptions.RequestException:
         logger.error("Vault request failed")
         return False
     if response.status_code == 201 or response.status_code == 200:
+        response.raise_for_status()
         logger.info("Successfully posted!")
         return json.dumps(response.json())
     else:
@@ -142,6 +124,44 @@ def get_json_property_value(content, prop):
     result=data.get(prop)
     return result
 
+
+def get_item_by_name(api, name):
+    """Select exactly one vault item by name, never a fuzzy search result."""
+    content = get_json(f"{api}/list/object/items?search={quote(name, safe='')}")
+    if content is None:
+        raise RuntimeError("Bitwarden item search failed")
+    try:
+        items = json.loads(content)["data"]["data"]
+        matches = [item for item in items if item.get("name") == name]
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise RuntimeError("Invalid Bitwarden item search response") from None
+    if len(matches) != 1:
+        raise RuntimeError(f"Expected one exact Bitwarden item match, found {len(matches)}")
+    item = matches[0]
+    if not isinstance(item.get("id"), str) or not item["id"]:
+        raise RuntimeError("Bitwarden item lacks a stable ID")
+    return item
+
+
+def get_totp(api, item_id):
+    """Use the immutable item ID; Bitwarden reports absent TOTP as HTTP 400."""
+    try:
+        response = requests.get(
+            f"{api}/object/totp/{quote(item_id, safe='')}",
+            headers=bitwarden_api_headers(), timeout=10, allow_redirects=False,
+        )
+        if response.status_code == 400:
+            return None
+        if response.status_code != 200:
+            raise RuntimeError(f"Bitwarden TOTP request failed ({response.status_code})")
+        response.raise_for_status()
+        return response.json()["data"]["data"]
+    except requests.exceptions.RequestException as error:
+        status = error.response.status_code if error.response is not None else "network"
+        raise RuntimeError(f"Bitwarden TOTP request failed ({status})") from None
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError("Invalid Bitwarden TOTP response") from None
+
 class defs:
     def __init__(self, vault, api, fname=INI_DEFAULT_FILE, debug=False):
         self.vault = vault
@@ -151,11 +171,10 @@ class defs:
 
 def WebRetriDoc(self, type=None, service=None):
 
-    # Check if <domain> is resolvable and directs to a local IP address
-    ip = is_domain_local_ip(self.vault)
-    if not ip:
+    # The vault may be Bitwarden Cloud; only the local bw serve API is restricted.
+    if not is_api_url_local(self.api):
+        logger.error("BW_API_URL must resolve only to local addresses")
         sys.exit(1)
-    logger.info(f"{self.vault} is resolvable and directs to local IP {ip}")
 
     # Check if Bitarden API at <bw_api_url> responds with success=true
     ret, status = bitwarden_api_check_status(self.api)
@@ -214,13 +233,20 @@ def WebRetriDoc(self, type=None, service=None):
                         continue
 
                 # Retrieve credentials
-                item = get_json(f"{self.api}/object/item/{service_user}")
-                username = get_json_property_value(item, "data_login_username")
-                passsword = get_json_property_value(item, "data_login_password")
-                uri = get_json_property_value(item, "data_login_uris_0_uri")
-                item = get_json(f"{self.api}/object/totp/{service_user}")
-                if item is not None: totp = get_json_property_value(item, "data_data") 
-                else: totp = None 
+                try:
+                    item = get_item_by_name(self.api, service_user)
+                    login = item.get("login") or {}
+                    username = login.get("username")
+                    passsword = login.get("password")
+                    uris = login.get("uris") or []
+                    uri = uris[0].get("uri") if uris else None
+                    if not username or not passsword or not uri:
+                        raise RuntimeError("Bitwarden item lacks login fields or URI")
+                    totp = get_totp(self.api, item["id"])
+                except (RuntimeError, AttributeError, TypeError, IndexError) as error:
+                    logger.error("Credential lookup failed for service %s: %s", servicename, error)
+                    failed = True
+                    continue
 
                 # Download Documents with the help of the appropriate automation library
                 if automation_library.lower() == "playwright":

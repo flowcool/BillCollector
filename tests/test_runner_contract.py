@@ -223,12 +223,13 @@ class RunnerContractTests(unittest.TestCase):
             ini = os.path.join(directory, "services.ini")
             Path(ini).write_text("[Playwright]\ndemo = first, second\n", encoding="utf-8")
             config = BillCollector.defs("vault.local", "http://vault.local", fname=ini)
-            with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+            with patch.object(BillCollector, "is_api_url_local", return_value=True), \
                  patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
                  patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
                  patch.object(BillCollector, "is_json_property_value", return_value=True), \
-                 patch.object(BillCollector, "get_json", return_value='{"data":{}}'), \
-                 patch.object(BillCollector, "get_json_property_value", return_value="placeholder"), \
+                 patch.object(BillCollector, "get_item_by_name", return_value={"id": "item-id", "login": {
+                     "username": "alice", "password": "password", "uris": [{"uri": "https://example.test"}]}}), \
+                 patch.object(BillCollector, "get_totp", return_value=None), \
                  patch.object(BillCollector, "retrieve_from_service_with_playwright", side_effect=[True, False]) as retrieve:
                 self.assertFalse(BillCollector.WebRetriDoc(config, "playwright"))
             self.assertEqual(retrieve.call_count, 2)
@@ -244,11 +245,11 @@ class RunnerContractTests(unittest.TestCase):
             for contents, service in cases:
                 with self.subTest(service=service):
                     ini.write_text(contents, encoding="utf-8")
-                    with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+                    with patch.object(BillCollector, "is_api_url_local", return_value=True), \
                          patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
                          patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
                          patch.object(BillCollector, "is_json_property_value", return_value=True), \
-                         patch.object(BillCollector, "get_json") as vault_lookup, \
+                         patch.object(BillCollector, "get_item_by_name") as vault_lookup, \
                          patch.object(BillCollector, "retrieve_from_service_with_playwright") as browser_run:
                         self.assertEqual(BillCollector.playwright_exit_code(config, service), 1)
                         vault_lookup.assert_not_called()
@@ -259,12 +260,13 @@ class RunnerContractTests(unittest.TestCase):
             ini = os.path.join(directory, "services.ini")
             Path(ini).write_text("[Playwright]\ndemo = first\n", encoding="utf-8")
             config = BillCollector.defs("vault.local", "http://vault.local", fname=ini)
-            with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+            with patch.object(BillCollector, "is_api_url_local", return_value=True), \
                  patch.object(BillCollector, "bitwarden_api_check_status", return_value=(True, "unlocked")), \
                  patch.object(BillCollector, "post_json", return_value='{"success":true}'), \
                  patch.object(BillCollector, "is_json_property_value", return_value=True), \
-                 patch.object(BillCollector, "get_json", return_value='{"data":{}}'), \
-                 patch.object(BillCollector, "get_json_property_value", return_value="placeholder"), \
+                 patch.object(BillCollector, "get_item_by_name", return_value={"id": "item-id", "login": {
+                     "username": "alice", "password": "password", "uris": [{"uri": "https://example.test"}]}}), \
+                 patch.object(BillCollector, "get_totp", return_value=None), \
                  patch.object(BillCollector, "retrieve_from_service_with_playwright",
                               side_effect=runner.retrieve_from_service_with_playwright), \
                  patch.object(runner, "load_playwright_recipe", return_value={"services": []}), \
