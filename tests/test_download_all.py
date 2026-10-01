@@ -195,6 +195,17 @@ class DownloadAllTests(unittest.TestCase):
         self.assertEqual(results, [{"result": "published"}])
         self.assertTrue(all(handle.disposed for handle in listing.handles))
 
+    def test_list_above_cap_fails_before_any_click(self):
+        bcs, listing, publisher = self.setup_listing([
+            {"href": f"/{index}.pdf", "text": str(index), "download": str(index)}
+            for index in range(3)
+        ])
+        with patch.object(runner, "MAX_DOWNLOAD_ALL_ITEMS", 2):
+            with self.assertRaisesRegex(RuntimeError, "3 items; the limit is 2"):
+                download_all_locator(bcs, listing, publisher, 100)
+        self.assertEqual(listing.clicked, [])
+        self.assertEqual(publisher.downloads, [])
+
     def test_empty_changed_and_partial_lists_fail(self):
         bcs, listing, publisher = self.setup_listing([])
         with self.assertRaisesRegex(RuntimeError, "empty"):

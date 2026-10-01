@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 PUBLICATION_ROOT_ENV = "BILLCOLLECTOR_PUBLICATION_ROOT"
 PUBLICATION_SHARED_GID_ENV = "BILLCOLLECTOR_PUBLICATION_SHARED_GID"
 DOWNLOAD_SETTLE_MS = 500
+# Upper bound on one download_all list. Above it the run fails instead of
+# truncating; the recipe author narrows the selector.
+MAX_DOWNLOAD_ALL_ITEMS = 200
 
 
 def publication_context():
@@ -302,6 +305,8 @@ def download_all_locator(bcs, locator, publisher, timeout_ms=30_000, results=Non
     count = len(identities)
     if not count:
         raise RuntimeError("Download list is empty")
+    if count > MAX_DOWNLOAD_ALL_ITEMS:
+        raise RuntimeError(f"Download list has {count} items; the limit is {MAX_DOWNLOAD_ALL_ITEMS}")
     if len(set(identities)) != count:
         raise RuntimeError("Download list contains ambiguous duplicate controls")
     for index in range(count):
