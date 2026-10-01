@@ -1,7 +1,7 @@
 # Playwright profile proof of concept (M3)
 
-The launcher now selects one Chromium user-data directory per Bitwarden item
-name (`service_user`), rather than deleting a shared profile before every run.
+The launcher now selects one Chromium user-data directory per immutable Bitwarden
+item ID, rather than deleting a shared profile before every run.
 The directory name is a SHA-256-derived opaque identifier, so account labels do
 not become filesystem path components. Existing cookies and Chromium
 `Preferences` are preserved. A new profile receives the preference to download
@@ -38,9 +38,13 @@ only if the target does not already exist. The parent of the profile root must
 also be trusted. Never place the root on the Paperless
 consume or download staging mount.
 
-This local branch does not migrate the previous shared `/apps/browser/profile`,
-and users may need to authenticate again. A changed Bitwarden item name creates
-a new profile. It does not implement authenticated backup/restore. A real
+This local branch does not migrate the previous shared `/apps/browser/profile`
+or the earlier name-derived Playwright profile. Users may need to authenticate
+again. Renaming an item keeps its profile and publication history, but the
+ini entry and the approvals-file key are name-based and must be renamed too;
+deleting and recreating the item creates a fresh profile. Do not copy the old name-derived profile to the new ID
+without reviewing its cookies and account ownership. It does not implement
+authenticated backup/restore. A real
 Chromium smoke against a local synthetic portal now verifies a persistent
 cookie across two process runs; it does not validate any real provider. The
 synthetic cookie has an expiry (`Max-Age`): a browser session cookie without

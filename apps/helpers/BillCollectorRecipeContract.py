@@ -12,6 +12,7 @@ import re
 import stat
 import sys
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 import yaml
@@ -275,6 +276,12 @@ def load_playwright_recipe(service_name, recipe_dir=None, *, allowed_origins=Non
     return validate_recipe_contract(recipe, normalized, external=external, allowed_origins=allowed_origins)
 
 
+class RecipeApproval(NamedTuple):
+    recipe: dict
+    allowed_origins: frozenset
+    item_id: str
+
+
 def preflight_external_recipe(service_name, account_id):
     """Freeze an approved recipe and account-scoped origins before vault lookup."""
     recipe_dir = os.environ.get(RECIPE_DIR_ENV)
@@ -302,6 +309,9 @@ def preflight_external_recipe(service_name, account_id):
         raise RecipeContractError("service/account has no matching recipe approval")
     digest = entry.get("sha256")
     origins = entry.get("origins")
+    item_id = entry.get("itemId")
+    if not isinstance(item_id, str) or not item_id.strip():
+        raise RecipeContractError("approval needs a Bitwarden itemId pin")
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
         raise RecipeContractError("approval needs a SHA-256 recipe pin")
     if not isinstance(origins, list) or not origins or any(
@@ -313,7 +323,7 @@ def preflight_external_recipe(service_name, account_id):
         raise RecipeContractError("account origins exceed the deployment allowlist")
     recipe = load_playwright_recipe(normalized, allowed_origins=allowed,
                                     expected_sha256=digest)
-    return recipe, allowed
+    return RecipeApproval(recipe, allowed, item_id)
 
 
 if __name__ == "__main__":

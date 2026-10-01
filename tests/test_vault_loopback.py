@@ -1,6 +1,7 @@
 """Exercise the existing vault HTTP boundary without a real vault or account."""
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -30,11 +31,12 @@ class VaultLoopbackTests(unittest.TestCase):
                 calls.append(self.path)
                 if self.path == "/status":
                     self.reply({"success": True, "data": {"template_status": "unlocked"}})
-                elif self.path == "/object/item/lab%20alice":
-                    self.reply({"data": {"login": {"username": "alice",
+                elif self.path == "/list/object/items?search=lab%20alice":
+                    self.reply({"data": {"data": [{"id": "item-123", "name": "lab alice",
+                                "login": {"username": "alice",
                                 "password": "synthetic-password",
-                                "uris": [{"uri": "https://portal.invalid"}]}}})
-                elif self.path == "/object/totp/lab%20alice":
+                                "uris": [{"uri": "https://portal.invalid"}]}}]}})
+                elif self.path == "/object/totp/item-123":
                     self.reply({"data": {"data": "123456"}})
                 else:
                     self.send_error(404)
@@ -54,15 +56,17 @@ class VaultLoopbackTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             ini = Path(directory) / "services.ini"
             ini.write_text("[Playwright]\nlab = alice\n", encoding="utf-8")
-            config = BillCollector.defs("vault.local", f"http://127.0.0.1:{server.server_port}", fname=str(ini))
-            with patch.object(BillCollector, "is_domain_local_ip", return_value="127.0.0.1"), \
+            config = BillCollector.defs("vault.bitwarden.com", f"http://127.0.0.1:{server.server_port}", fname=str(ini))
+            with patch.dict(os.environ, {"HTTP_PROXY": "http://public-proxy.invalid:3128",
+                                      "HTTPS_PROXY": "http://public-proxy.invalid:3128",
+                                      "NO_PROXY": ""}), \
                  patch.object(BillCollector, "retrieve_from_service_with_playwright", return_value=True) as runner:
                 self.assertTrue(BillCollector.WebRetriDoc(config, "playwright"))
             self.assertEqual(runner.call_args.args[:5],
                              ("lab", "https://portal.invalid", "alice", "synthetic-password", "123456"))
-            self.assertEqual(runner.call_args.kwargs["account_id"], "lab alice")
-            self.assertEqual(calls, ["/status", "/sync", "/object/item/lab%20alice",
-                                     "/object/totp/lab%20alice"])
+            self.assertEqual(runner.call_args.kwargs["account_id"], "item-123")
+            self.assertEqual(calls, ["/status", "/sync", "/list/object/items?search=lab%20alice",
+                                     "/object/totp/item-123"])
 
 
 if __name__ == "__main__":
