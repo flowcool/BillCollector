@@ -112,6 +112,13 @@ def https_origin(url):
     return f"https://{host}{f':{port}' if port not in (None, 443) else ''}"
 
 
+def download_origin(url):
+    """Return the HTTPS origin of a download URL; blob: URLs carry their creator's origin."""
+    if isinstance(url, str) and url.startswith("blob:"):
+        url = url[len("blob:"):]
+    return https_origin(url)
+
+
 def external_recipe_origins(value=None):
     """Require an operator-supplied, exact HTTPS origin allowlist."""
     raw = os.environ.get(EXTERNAL_ORIGINS_ENV) if value is None else value
@@ -174,6 +181,11 @@ def _validate_steps(steps, location, capabilities, allowed_origins=None, *, in_d
                     raise RecipeContractError(f"{method_where}: credentials are only allowed in fill(value)")
                 if (allowed_origins is not None and value in SECRET_PLACEHOLDERS and in_frame):
                     raise RecipeContractError(f"{method_where}: credential fill inside a frame is unsupported")
+            # Internal engines such as internal:control=enter-frame cross frame
+            # boundaries inside one selector and would bypass the in_frame check.
+            if (allowed_origins is not None and method == "locator"
+                    and "internal:" in arguments["selector"].lower()):
+                raise RecipeContractError(f"{method_where}: internal selector engines are not allowed")
             if method == "goto":
                 try:
                     url = urlsplit(arguments["url"])
