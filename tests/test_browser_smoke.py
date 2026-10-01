@@ -150,3 +150,116 @@ class BrowserSmokeTests(unittest.TestCase):
                     "SELECT result FROM Service ORDER BY id DESC LIMIT 1").fetchone()[0], "failure")
             finally:
                 connection.close()
+
+    def test_credential_fill_into_cross_origin_frame_is_blocked(self):
+        leaks = []
+
+        class Site(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/":
+                    body = (f"<input id='p'><iframe src='http://localhost:"
+                            f"{frame_server.server_port}/frame'></iframe>").encode()
+                elif self.path == "/frame":
+                    body = b"<input id='p' oninput=\"fetch('/leak?v='+this.value)\">"
+                else:
+                    leaks.append(self.path)
+                    body = b""
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                pass
+
+        servers = [ThreadingHTTPServer(("127.0.0.1", 0), Site) for _ in range(2)]
+        top_server, frame_server = servers
+        for server in servers:
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+        frame_step = {"step": 1, "methods": [
+            {"method": "locator", "arguments": [{"selector": "iframe >> internal:control=enter-frame >> #p"}]},
+            {"method": "fill", "arguments": [{"value": "{{PASSWORD}}"}]},
+        ]}
+        top_step = copy.deepcopy(frame_step)
+        top_step["methods"][0]["arguments"] = [{"selector": "#p"}]
+        cache = str(Path.home() / ".cache" / "ms-playwright")
+        with patch.dict(os.environ, {"PLAYWRIGHT_BROWSERS_PATH": cache}), sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            try:
+                page = browser.new_page()
+                page.goto(f"http://127.0.0.1:{top_server.server_port}/")
+                page.frame_locator("iframe").locator("#p").wait_for()
+                bcs = SimpleNamespace(service="sample", page=page, usr="user", pwd="SENTINEL", otp=None,
+                                      external_recipe=True,
+                                      allowed_recipe_origins=frozenset({"https://approved.test"}))
+                # The loopback page is HTTP; treat it as the approved origin so only
+                # the frame check stands between the secret and the child frame.
+                with patch.object(runner, "https_origin", return_value="https://approved.test"):
+                    with self.assertRaisesRegex(runner.RecipeContractError, "top-level page"):
+                        runner.process_step(bcs, frame_step)
+                    self.assertFalse(runner.process_step(bcs, top_step).error_status)
+                page.wait_for_timeout(300)
+                self.assertEqual(page.locator("#p").input_value(), "SENTINEL")
+                self.assertEqual(page.frame_locator("iframe").locator("#p").input_value(), "")
+                self.assertEqual(leaks, [])
+            finally:
+                browser.close()
+
+    def test_credential_fill_after_navigation_during_wait_is_blocked(self):
+        leaks = []
+
+        class Site(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/":
+                    # Approved page: no field yet, then it leaves for another origin.
+                    body = (f"<script>setTimeout(() => location.href = 'http://localhost:"
+                            f"{other_server.server_port}/form', 200)</script>").encode()
+                elif self.path == "/form":
+                    body = b"<input id='p' oninput=\"fetch('/leak?v='+this.value)\">"
+                else:
+                    leaks.append(self.path)
+                    body = b""
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                pass
+
+        servers = [ThreadingHTTPServer(("127.0.0.1", 0), Site) for _ in range(2)]
+        approved_server, other_server = servers
+        for server in servers:
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+        approved_prefix = f"http://127.0.0.1:{approved_server.server_port}/"
+        step = {"step": 1, "methods": [
+            {"method": "locator", "arguments": [{"selector": "#p"}]},
+            {"method": "fill", "arguments": [{"value": "{{PASSWORD}}"}]},
+        ]}
+        cache = str(Path.home() / ".cache" / "ms-playwright")
+        with patch.dict(os.environ, {"PLAYWRIGHT_BROWSERS_PATH": cache}), sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            try:
+                page = browser.new_page()
+                page.goto(approved_prefix)
+                bcs = SimpleNamespace(service="sample", page=page, usr="user", pwd="SENTINEL", otp=None,
+                                      external_recipe=True,
+                                      allowed_recipe_origins=frozenset({"https://approved.test"}))
+                # Map the loopback HTTP origins: only the first server is approved.
+                def origin(url):
+                    approved = str(url).startswith(approved_prefix)
+                    return "https://approved.test" if approved else "https://other.test"
+
+                with patch.object(runner, "https_origin", side_effect=origin):
+                    with self.assertRaisesRegex(runner.RecipeContractError, "element origin"):
+                        runner.process_step(bcs, step)
+                page.wait_for_timeout(300)
+                self.assertTrue(page.url.endswith("/form"))
+                self.assertEqual(page.locator("#p").input_value(), "")
+                self.assertEqual(leaks, [])
+            finally:
+                browser.close()

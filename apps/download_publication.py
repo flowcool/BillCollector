@@ -20,6 +20,10 @@ import uuid
 from pathlib import Path
 
 
+# Invoices are KB to a few MB; the cap bounds disk and DMS use per document.
+MAX_PUBLICATION_BYTES = 100 * 1024 * 1024
+
+
 class PublicationError(RuntimeError):
     """A download cannot be safely published or recovered."""
 
@@ -38,13 +42,17 @@ class DownloadPublisher:
     """
 
     def __init__(self, state_dir: str | Path, output_dir: str | Path, staging_dir: str | Path,
-                 *, shared_gid: int | None = None):
+                 *, shared_gid: int | None = None, accept_url=None,
+                 max_bytes: int = MAX_PUBLICATION_BYTES):
         if shared_gid is not None and (type(shared_gid) is not int or shared_gid <= 0):
             raise ValueError("Shared publication GID must be a positive integer")
         self.state_dir = Path(state_dir)
         self.output_dir = Path(output_dir)
         self.stage_dir = Path(staging_dir)
         self.shared_gid = shared_gid
+        # Optional caller policy on download.url, e.g. an origin allowlist.
+        self.accept_url = accept_url
+        self.max_bytes = max_bytes
         self._lock_fd: int | None = None
         self._db: sqlite3.Connection | None = None
 
@@ -134,9 +142,18 @@ class DownloadPublisher:
         if self._db is None or not service or not account:
             raise PublicationError("An active run and stable service/account are required")
         account_hash = hashlib.sha256(f"{service}\0{account}".encode()).hexdigest()
+        # Refuse before failure(): it waits for completion, and a refused
+        # origin could stream forever.
+        if self.accept_url is not None and not self.accept_url(download.url):
+            download.cancel()
+            raise PublicationError("Download URL is not approved for publication")
         failure = download.failure()  # Waits for browser download completion.
         if failure is not None:
             raise PublicationError("Browser reported a failed download")
+        # Playwright has no in-flight byte cap; refuse before copying the
+        # browser's temporary file. The hard bound is a storage quota.
+        if os.path.getsize(download.path()) > self.max_bytes:
+            raise PublicationError("Downloaded artifact exceeds the publication size limit")
 
         stage_name = f"{uuid.uuid4().hex}.part"
         stage = self.stage_dir / stage_name
@@ -146,6 +163,8 @@ class DownloadPublisher:
             info = stage.lstat()
             if not stat.S_ISREG(info.st_mode) or info.st_size == 0:
                 raise PublicationError("Downloaded artifact is not a nonempty regular file")
+            if info.st_size > self.max_bytes:
+                raise PublicationError("Downloaded artifact exceeds the publication size limit")
             os.chmod(stage, 0o600)
             digest = self._digest_and_sync(stage)
             final_name = f"{account_hash[:16]}-{digest}.pdf"
