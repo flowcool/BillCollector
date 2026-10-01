@@ -309,5 +309,22 @@ class RunnerContractTests(unittest.TestCase):
         self.assertNotIn(secret, "\n".join(captured.output))
 
 
+    def test_external_run_limits_publication_to_approved_origins(self):
+        publisher = MagicMock()
+        browser = MagicMock()
+        bcs = SimpleNamespace(yml={"services": []}, usr="user", account_id="demo user", db=None,
+                              page=None, drv=None, external_recipe=True,
+                              allowed_recipe_origins=frozenset({"https://good.test"}))
+        with patch.object(runner, "sync_playwright"), \
+             patch.object(runner, "locked_profile", return_value=nullcontext("/tmp/mock-profile")), \
+             patch.object(runner, "publication_context", return_value=nullcontext(publisher)), \
+             patch.object(runner, "InitBrowser", return_value=browser):
+            self.assertEqual(runner.perform_actions(bcs), [])
+        self.assertTrue(publisher.accept_url("https://good.test/a.pdf"))
+        self.assertTrue(publisher.accept_url("blob:https://good.test/0b1c"))
+        self.assertFalse(publisher.accept_url("https://evil.test/a.pdf"))
+        self.assertFalse(publisher.accept_url("data:application/pdf;base64,JVBERi0="))
+
+
 if __name__ == "__main__":
     unittest.main()

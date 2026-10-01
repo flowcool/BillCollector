@@ -342,5 +342,22 @@ class DownloadPublicationTests(unittest.TestCase):
         self.assertEqual(db.read_bytes(), b"not a database")
 
 
+    def test_url_policy_and_size_cap_reject_before_output(self):
+        download = FakeDownload()
+        download.url = "https://evil.test/invoice.pdf"
+        with DownloadPublisher(self.state, self.output, self.staging,
+                               accept_url=lambda url: url.startswith("https://good.test/")) as publisher:
+            with self.assertRaisesRegex(PublicationError, "not approved"):
+                publisher.publish(download, service="portal", account="alice")
+            self.assertFalse(download.saved)
+            download.url = "https://good.test/invoice.pdf"
+            self.assertTrue(publisher.publish(download, service="portal", account="alice"))
+        with DownloadPublisher(self.state, self.output, self.staging, max_bytes=len(PDF) - 1) as publisher:
+            with self.assertRaisesRegex(PublicationError, "size limit"):
+                publisher.publish(FakeDownload(PDF + b"other"), service="portal", account="bob")
+        self.assertEqual(len(list(self.output.iterdir())), 1)
+        self.assertEqual(list(self.staging.iterdir()), [])
+
+
 if __name__ == "__main__":
     unittest.main()

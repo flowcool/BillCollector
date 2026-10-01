@@ -278,17 +278,43 @@ class RecipeContractTests(unittest.TestCase):
             {"method": "get_by_role", "arguments": [{"role": "textbox"}]},
             {"method": "fill", "arguments": [{"value": "{{PASSWORD}}"}]},
         ]}
+        handle = locator.element_handle.return_value
+        handle.owner_frame.return_value = page.main_frame
         with patch("BillCollectorServices_pw.PageState"):
             with self.assertRaisesRegex(RecipeContractError, "credential fill blocked"):
                 process_step(bcs, step)
-            locator.fill.assert_not_called()
+            handle.fill.assert_not_called()
             page.url = "https://example.test:443/login"
             process_step(bcs, step)
-            locator.fill.assert_called_once_with(value="secret")
+            handle.fill.assert_called_once_with(value="secret")
+            locator.fill.assert_not_called()
             page.url = "https://example.test:8443/login"
             with self.assertRaisesRegex(RecipeContractError, "credential fill blocked"):
                 process_step(bcs, step)
-            locator.fill.assert_called_once_with(value="secret")
+            handle.fill.assert_called_once_with(value="secret")
+            # An allowed top-level origin does not cover an element in a child frame.
+            page.url = "https://example.test/login"
+            handle.owner_frame.return_value = Mock(name="child frame")
+            with self.assertRaisesRegex(RecipeContractError, "not in the top-level page"):
+                process_step(bcs, step)
+            handle.fill.assert_called_once_with(value="secret")
+
+    def test_external_recipe_rejects_internal_selector_engines(self):
+        recipe = copy.deepcopy(VALID_RECIPE)
+        recipe["services"][0]["steps"][1]["methods"] = [
+            {"method": "locator",
+             "arguments": [{"selector": "iframe >> INTERNAL:control=enter-frame >> input"}]},
+            {"method": "fill", "arguments": [{"value": "{{PASSWORD}}"}]},
+        ]
+        with self.assertRaisesRegex(RecipeContractError, "internal selector engines"):
+            validate_recipe_contract(recipe, "sample", external=True, allowed_origins=ALLOWED_ORIGINS)
+
+    def test_download_origin_uses_blob_creator_origin(self):
+        from helpers.BillCollectorRecipeContract import download_origin
+        self.assertEqual(download_origin("blob:https://example.test/0b1c"), "https://example.test")
+        self.assertEqual(download_origin("https://example.test:443/a.pdf"), "https://example.test")
+        self.assertIsNone(download_origin("data:application/pdf;base64,JVBERi0="))
+        self.assertIsNone(download_origin("http://example.test/a.pdf"))
 
     def test_name_and_symlink_cannot_escape_directory(self):
         with tempfile.TemporaryDirectory() as recipe_dir:
