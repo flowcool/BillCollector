@@ -25,7 +25,7 @@
 
 BillCollector uses:
 
-- Vaultwarden as a safe vault of the login data for the online accounts
+- Vaultwarden or Bitwarden Cloud as a vault for online-account login data
 - Chrome for testing and Chromedriver as the browser front end of the service provider's online portal
 - Selenium (for Python) to automate the browser control
 
@@ -39,7 +39,7 @@ Following diagram depicts the complete BillCollector Ecosystem:
 
 Scheduled, for instance, bi-monthly, your server's cron daemon runs the BillCollector docker container which exposes a download folder to the server's file system. The docker container integrates Chrome and Chromedriver to interact with the service provider's online portal.
 
-For each container run, BillCollector scripts the `List of Services`, gets the secret login data from Vaultwarden via the Bitwarden API, accesses the web service via the configured Selenium recipes, and downloads the documents.
+For each container run, BillCollector scripts the `List of Services`, gets the secret login data from the configured vault via a local Bitwarden CLI API, accesses the web service via the configured recipes, and downloads the documents.
 
 With a document-processing document management system (DMS) such as Paperless ngx in place, the downloaded file is consumed, automatically analyzed, tagged, and sorted.
 
@@ -58,7 +58,7 @@ With a document-processing document management system (DMS) such as Paperless ng
 
 ## Quick Start
 
-BillCollector requires the following services:
+This Vaultwarden example uses the following services:
 
 - Docker environment
 - Vaultwarden (docker image: vaultwarden/server:latest) with Bitwarden API (<https://bitwarden.com/help/vault-management-api/>) in one docker stack
@@ -74,7 +74,8 @@ I have it running on my self-built Mini-ITX Intel Pentium J5040 NAS hardware equ
 
 ### Vault of Secrets
 
-BillCollector uses the self-hosted [Vaultwarden](https://github.com/dani-garcia/vaultwarden) password manager.
+BillCollector can use self-hosted [Vaultwarden](https://github.com/dani-garcia/vaultwarden)
+or Bitwarden Cloud through a local `bw serve` API.
 
 Why Vaultwarden?
 
@@ -157,11 +158,13 @@ First and once, for the basic configuration you need to adapt the `.env` file lo
 
 - `cp .env.example .env`
 - define the .env-variables:
-  - `BW_API_URL=<http/https URL of the local bw serve API, e.g., http://bitwarden-cli:8087>`
+  - `BW_API_URL=<HTTP URL of the local bw serve API, e.g., http://bitwarden-cli:8087>`
   - `BW_API_HOST=<optional Host header expected by bw serve, e.g., 127.0.0.1:8087>`
 
 The Bitwarden vault may be hosted by Bitwarden Cloud. `BW_API_URL` must resolve
-only to private or loopback addresses. Set `BW_API_HOST` when a container-network
+only to private or loopback addresses. HTTPS is not supported for this API URL;
+use a private container network or loopback for the local HTTP connection.
+Set `BW_API_HOST` when a container-network
 name is used to reach a `bw serve` instance bound to a different Host value.
 `VAULT_HOST` is retained as a legacy setting but is no longer used to restrict
 the vault endpoint.

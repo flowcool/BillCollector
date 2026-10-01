@@ -16,7 +16,6 @@ from helpers.BillCollectorRecipeContract import (
     SECRET_PLACEHOLDERS,
     https_origin,
     load_playwright_recipe,
-    preflight_external_recipe,
 )
 from profile_store import locked_profile
 from download_publication import DownloadPublisher, PublicationError
@@ -187,10 +186,9 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *
     try:
         bcs.external_recipe = os.environ.get(RECIPE_DIR_ENV) is not None
         if bcs.external_recipe:
-            bcs.yml, bcs.allowed_recipe_origins = (
-                recipe_preflight if recipe_preflight is not None else
-                preflight_external_recipe(service, account_id)
-            )
+            if recipe_preflight is None or recipe_preflight[2] != account_id:
+                raise RecipeContractError("external recipe needs a matching item ID approval")
+            bcs.yml, bcs.allowed_recipe_origins = recipe_preflight[:2]
         else:
             bcs.yml = load_playwright_recipe(service)
             bcs.allowed_recipe_origins = None

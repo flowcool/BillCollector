@@ -34,37 +34,57 @@ def extract_strings(line):
         return before_bracket, within_bracket
     return line.strip(), []
 
-def is_api_url_local(url):
-    """Require every resolved bw serve address to be private or loopback."""
+def pinned_api_url(url):
+    """Resolve and return an HTTP URL bound to a vetted local IP address."""
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            return False
+        if (parsed.scheme != "http" or not parsed.hostname or not parsed.port
+                or parsed.username or parsed.password or parsed.fragment):
+            raise ValueError("invalid local API URL")
         addresses = {info[4][0] for info in socket.getaddrinfo(parsed.hostname, parsed.port)}
-        return bool(addresses) and all(
+        if not addresses or not all(
             any(ipaddress.ip_address(address) in network for network in LOCAL_API_NETWORKS)
             for address in addresses
-        )
-    except (OSError, TypeError, ValueError):
+        ):
+            raise ValueError("non-local API address")
+        chosen = sorted(addresses)[0]
+        host = f"[{chosen}]" if ":" in chosen else chosen
+        return parsed._replace(netloc=f"{host}:{parsed.port}").geturl(), parsed.netloc
+    except (OSError, TypeError, ValueError) as error:
+        raise ValueError("BW_API_URL must resolve only to local HTTP addresses") from None
+
+
+def is_api_url_local(url):
+    try:
+        pinned_api_url(url)
+        return True
+    except ValueError:
         return False
 
 
-def bitwarden_api_headers():
-    host = os.getenv("BW_API_HOST", "").strip()
-    return {"Host": host} if host else None
+def private_api_request(method, url, **kwargs):
+    """Disable ambient proxies and pin the actual connection to a checked IP."""
+    pinned_url, original_host = pinned_api_url(url)
+    host = os.getenv("BW_API_HOST", "").strip() or original_host
+    with requests.Session() as session:
+        session.trust_env = False
+        return session.request(method, pinned_url, headers={"Host": host},
+                               timeout=10, allow_redirects=False, **kwargs)
 
 
 # Get web content
 def get_json(url):
     try:
-        response = requests.get(url, headers=bitwarden_api_headers(), timeout=10,
-                                allow_redirects=False)
+        response = private_api_request("GET", url)
         if response.status_code not in (200, 201):
             logger.error("Vault request failed (%s)", response.status_code)
             return None
         response.raise_for_status()
         return response.text
-    except requests.exceptions.RequestException as error:
+    except (requests.exceptions.RequestException, ValueError) as error:
+        if isinstance(error, ValueError):
+            logger.error("Invalid local Bitwarden API URL")
+            return None
         status = error.response.status_code if error.response is not None else "network"
         logger.error("Vault request failed (%s)", status)
         return None
@@ -106,9 +126,8 @@ def is_string_valid(string):
     
 def post_json(url, payload):
     try:
-        response = requests.post(url, json=payload, headers=bitwarden_api_headers(), timeout=10,
-                                 allow_redirects=False)
-    except requests.exceptions.RequestException:
+        response = private_api_request("POST", url, json=payload)
+    except (requests.exceptions.RequestException, ValueError):
         logger.error("Vault request failed")
         return False
     if response.status_code == 201 or response.status_code == 200:
@@ -146,12 +165,11 @@ def get_item_by_name(api, name):
 def get_totp(api, item_id):
     """Use the immutable item ID; Bitwarden reports absent TOTP as HTTP 400."""
     try:
-        response = requests.get(
-            f"{api}/object/totp/{quote(item_id, safe='')}",
-            headers=bitwarden_api_headers(), timeout=10, allow_redirects=False,
-        )
+        response = private_api_request("GET", f"{api}/object/totp/{quote(item_id, safe='')}")
         if response.status_code == 400:
-            return None
+            if "no totp" in response.text.lower():
+                return None
+            raise RuntimeError("Bitwarden TOTP request failed (400)")
         if response.status_code != 200:
             raise RuntimeError(f"Bitwarden TOTP request failed ({response.status_code})")
         response.raise_for_status()
@@ -173,7 +191,7 @@ def WebRetriDoc(self, type=None, service=None):
 
     # The vault may be Bitwarden Cloud; only the local bw serve API is restricted.
     if not is_api_url_local(self.api):
-        logger.error("BW_API_URL must resolve only to local addresses")
+        logger.error("BW_API_URL must resolve only to local HTTP addresses")
         sys.exit(1)
 
     # Check if Bitarden API at <bw_api_url> responds with success=true
@@ -235,6 +253,8 @@ def WebRetriDoc(self, type=None, service=None):
                 # Retrieve credentials
                 try:
                     item = get_item_by_name(self.api, service_user)
+                    if recipe_preflight is not None and item["id"] != recipe_preflight[2]:
+                        raise RuntimeError("Bitwarden item ID differs from operator approval")
                     login = item.get("login") or {}
                     username = login.get("username")
                     passsword = login.get("password")
@@ -252,7 +272,7 @@ def WebRetriDoc(self, type=None, service=None):
                 if automation_library.lower() == "playwright":
                     if not retrieve_from_service_with_playwright(
                         servicename, uri, username, passsword, totp, self.debug,
-                        account_id=service_user, recipe_preflight=recipe_preflight,
+                        account_id=item["id"], recipe_preflight=recipe_preflight,
                     ):
                         failed = True
     #

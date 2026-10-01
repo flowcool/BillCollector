@@ -108,6 +108,12 @@ stage and final files exist. Procedure, with the run stopped:
 M1 propagates runner and publication failures. M2/M3 supply the stable
 Bitwarden-item account identity and profile lock; the profile and publication
 locks now span the same account run. The old direct-download path was removed.
+The account key is now the immutable Bitwarden item ID. Existing experimental
+name-keyed publication rows are not migrated automatically. Before adopting
+this branch against a prior Playwright publication root, back up its SQLite
+state and reconcile already consumed PDFs with the DMS; otherwise the first
+ID-keyed run can publish the same PDF again. A replacement item with the same
+name gets a new key and requires a new external recipe `itemId` approval.
 The local synthetic browser and Docker contracts cover the non-root image,
 same-mount rename, and a separate UID in the shared group reading/removing a
 PDF while private state remains inaccessible. A real provider and the actual

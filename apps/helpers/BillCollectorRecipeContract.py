@@ -290,6 +290,9 @@ def preflight_external_recipe(service_name, account_id):
         raise RecipeContractError("service/account has no matching recipe approval")
     digest = entry.get("sha256")
     origins = entry.get("origins")
+    item_id = entry.get("itemId")
+    if not isinstance(item_id, str) or not item_id.strip():
+        raise RecipeContractError("approval needs a Bitwarden itemId pin")
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
         raise RecipeContractError("approval needs a SHA-256 recipe pin")
     if not isinstance(origins, list) or not origins or any(
@@ -301,7 +304,7 @@ def preflight_external_recipe(service_name, account_id):
         raise RecipeContractError("account origins exceed the deployment allowlist")
     recipe = load_playwright_recipe(normalized, allowed_origins=allowed,
                                     expected_sha256=digest)
-    return recipe, allowed
+    return recipe, allowed, item_id
 
 
 if __name__ == "__main__":

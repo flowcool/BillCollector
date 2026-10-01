@@ -22,6 +22,7 @@ account origins must be a subset of the deployment-wide origin ceiling:
   "accounts": {
     "sample alice": {
       "service": "sample",
+      "itemId": "<immutable Bitwarden item ID>",
       "sha256": "<64 lowercase hex characters from sha256sum recipe-pw__sample.yaml>",
       "origins": ["https://example.test"]
     }
@@ -32,7 +33,9 @@ account origins must be a subset of the deployment-wide origin ceiling:
 Review the recipe and its origins together, calculate the SHA-256 of the
 reviewed file, then update the approval file. A changed recipe, unknown
 account, wrong service, or widened origin set fails **before** Bitwarden item
-or TOTP lookup. The approved YAML is parsed once and passed unchanged to the
+or TOTP lookup. After exact-name lookup, the item ID must match `itemId`
+before TOTP or browser work; replacing an item with the same name requires a
+new operator approval. The approved YAML is parsed once and passed unchanged to the
 runner, avoiding a second file read after credentials are fetched. A final
 symlink for the approval file is rejected. Protect the approval file and its
 parent directory against writes by the recipe source or browser process.

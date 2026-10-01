@@ -1,6 +1,6 @@
 """Local, per-account Chromium profile storage.
 
-The caller must provide a stable account identifier (the Bitwarden item name),
+The caller must provide a stable account identifier (the Bitwarden item ID),
 not a password or a session token. The profile root must live on a persistent,
 trusted volume if sessions should survive container replacement.
 """
