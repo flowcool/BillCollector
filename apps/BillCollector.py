@@ -47,7 +47,8 @@ def pinned_api_url(url):
             for address in addresses
         ):
             raise ValueError("non-local API address")
-        chosen = sorted(addresses)[0]
+        # Prefer IPv4, then numeric order: deterministic and reachable from v4-only binds.
+        chosen = str(min(map(ipaddress.ip_address, addresses), key=lambda ip: (ip.version, ip)))
         host = f"[{chosen}]" if ":" in chosen else chosen
         return parsed._replace(netloc=f"{host}:{parsed.port}").geturl(), parsed.netloc
     except (OSError, TypeError, ValueError) as error:
@@ -79,7 +80,6 @@ def get_json(url):
         if response.status_code not in (200, 201):
             logger.error("Vault request failed (%s)", response.status_code)
             return None
-        response.raise_for_status()
         return response.text
     except (requests.exceptions.RequestException, ValueError) as error:
         if isinstance(error, ValueError):
@@ -131,9 +131,13 @@ def post_json(url, payload):
         logger.error("Vault request failed")
         return False
     if response.status_code == 201 or response.status_code == 200:
-        response.raise_for_status()
+        try:
+            body = response.json()
+        except ValueError:
+            logger.error("Vault request returned invalid JSON")
+            return False
         logger.info("Successfully posted!")
-        return json.dumps(response.json())
+        return json.dumps(body)
     else:
         logger.error("Vault request failed: HTTP %s", response.status_code)
         return False
@@ -145,13 +149,19 @@ def get_json_property_value(content, prop):
 
 
 def get_item_by_name(api, name):
-    """Select exactly one vault item by name, never a fuzzy search result."""
+    """Select exactly one vault item by name, never a fuzzy search result.
+
+    ConfigParser lowercases ini keys, so names compare case-insensitively;
+    case variants of one name still count as an ambiguous match.
+    """
     content = get_json(f"{api}/list/object/items?search={quote(name, safe='')}")
     if content is None:
         raise RuntimeError("Bitwarden item search failed")
     try:
         items = json.loads(content)["data"]["data"]
-        matches = [item for item in items if item.get("name") == name]
+        wanted = name.casefold()
+        matches = [item for item in items
+                   if isinstance(item.get("name"), str) and item["name"].casefold() == wanted]
     except (KeyError, TypeError, ValueError, AttributeError):
         raise RuntimeError("Invalid Bitwarden item search response") from None
     if len(matches) != 1:
@@ -172,7 +182,6 @@ def get_totp(api, item_id):
             raise RuntimeError("Bitwarden TOTP request failed (400)")
         if response.status_code != 200:
             raise RuntimeError(f"Bitwarden TOTP request failed ({response.status_code})")
-        response.raise_for_status()
         return response.json()["data"]["data"]
     except requests.exceptions.RequestException as error:
         status = error.response.status_code if error.response is not None else "network"
@@ -253,7 +262,7 @@ def WebRetriDoc(self, type=None, service=None):
                 # Retrieve credentials
                 try:
                     item = get_item_by_name(self.api, service_user)
-                    if recipe_preflight is not None and item["id"] != recipe_preflight[2]:
+                    if recipe_preflight is not None and item["id"] != recipe_preflight.item_id:
                         raise RuntimeError("Bitwarden item ID differs from operator approval")
                     login = item.get("login") or {}
                     username = login.get("username")

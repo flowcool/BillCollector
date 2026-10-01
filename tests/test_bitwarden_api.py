@@ -86,7 +86,6 @@ class BitwardenApiUrlTests(unittest.TestCase):
             headers={"Host": "127.0.0.1:8087"}, timeout=10,
             allow_redirects=False)
         self.assertIs(session.trust_env, False)
-        response.raise_for_status.assert_called_once_with()
 
     @patch.dict("BillCollector.os.environ", {"BW_API_HOST": "127.0.0.1:8087"})
     @patch("BillCollector.socket.getaddrinfo", return_value=address_info("172.20.0.3"))
@@ -105,7 +104,34 @@ class BitwardenApiUrlTests(unittest.TestCase):
             json=None,
             headers={"Host": "127.0.0.1:8087"}, timeout=10,
             allow_redirects=False)
-        response.raise_for_status.assert_called_once_with()
+
+    @patch("BillCollector.socket.getaddrinfo", return_value=address_info("172.20.0.3"))
+    @patch("BillCollector.requests.Session")
+    def test_post_non_json_success_body_fails_cleanly(self, session_class, _dns):
+        response = MagicMock(status_code=200)
+        response.json.side_effect = ValueError("not json")
+        session_class.return_value.__enter__.return_value.request.return_value = response
+        with self.assertLogs("BillCollector", level="ERROR"):
+            self.assertIs(post_json("http://bitwarden-cli:8087/sync", None), False)
+
+    def test_dual_stack_private_resolution_pins_ipv4(self):
+        with patch("BillCollector.socket.getaddrinfo",
+                   return_value=address_info("fd00::5", "172.20.0.3", "10.0.0.9")):
+            self.assertEqual(pinned_api_url("http://bitwarden-cli:8087/status")[0],
+                             "http://10.0.0.9:8087/status")
+
+    @patch("BillCollector.get_json")
+    def test_item_lookup_ignores_ini_lowercasing(self, get):
+        get.return_value = '{"data":{"data":[{"id":"wanted","name":"winSIM Stefan"}]}}'
+        self.assertEqual(get_item_by_name("http://bitwarden-cli:8087", "winsim Stefan")["id"], "wanted")
+
+    @patch("BillCollector.get_json")
+    def test_item_lookup_rejects_case_variant_duplicates(self, get):
+        get.return_value = ('{"data":{"data":['
+                            '{"id":"a","name":"winSIM Stefan"},'
+                            '{"id":"b","name":"WINSIM Stefan"}]}}')
+        with self.assertRaisesRegex(RuntimeError, "found 2"):
+            get_item_by_name("http://bitwarden-cli:8087", "winsim Stefan")
 
     @patch("BillCollector.get_json")
     def test_item_lookup_requires_one_exact_name(self, get):
@@ -169,7 +195,6 @@ class BitwardenApiUrlTests(unittest.TestCase):
 
         self.assertEqual(
             get_totp("http://bitwarden-cli:8087", "item-id"), "123456")
-        response.raise_for_status.assert_called_once_with()
 
     @patch("BillCollector.private_api_request")
     def test_unexpected_totp_failure_is_not_hidden(self, request):

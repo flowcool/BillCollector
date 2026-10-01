@@ -186,9 +186,9 @@ def retrieve_from_service_with_playwright(service, url, user, pwd, otp, debug, *
     try:
         bcs.external_recipe = os.environ.get(RECIPE_DIR_ENV) is not None
         if bcs.external_recipe:
-            if recipe_preflight is None or recipe_preflight[2] != account_id:
+            if recipe_preflight is None or recipe_preflight.item_id != account_id:
                 raise RecipeContractError("external recipe needs a matching item ID approval")
-            bcs.yml, bcs.allowed_recipe_origins = recipe_preflight[:2]
+            bcs.yml, bcs.allowed_recipe_origins = recipe_preflight.recipe, recipe_preflight.allowed_origins
         else:
             bcs.yml = load_playwright_recipe(service)
             bcs.allowed_recipe_origins = None

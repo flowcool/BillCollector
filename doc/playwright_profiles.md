@@ -40,8 +40,9 @@ consume or download staging mount.
 
 This local branch does not migrate the previous shared `/apps/browser/profile`
 or the earlier name-derived Playwright profile. Users may need to authenticate
-again. Renaming an item keeps its profile; deleting and recreating the item
-creates a fresh profile. Do not copy the old name-derived profile to the new ID
+again. Renaming an item keeps its profile and publication history, but the
+ini entry and the approvals-file key are name-based and must be renamed too;
+deleting and recreating the item creates a fresh profile. Do not copy the old name-derived profile to the new ID
 without reviewing its cookies and account ownership. It does not implement
 authenticated backup/restore. A real
 Chromium smoke against a local synthetic portal now verifies a persistent
