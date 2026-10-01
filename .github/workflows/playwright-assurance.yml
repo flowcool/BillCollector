@@ -1,0 +1,72 @@
+name: Playwright assurance
+
+on:
+  pull_request:
+    branches: [playwright]
+  push:
+    branches: [playwright, "feature/playwright-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r apps/requirements.txt -r requirements-ci.txt
+      - run: python -m pip check
+      - run: python -m compileall -q apps tests
+      - run: bash -n BillCollector.sh
+      - run: ruff check --select F821 apps tests
+      - run: ruff check --select E4,E7,E9 tests apps/download_publication.py apps/profile_store.py apps/helpers/BillCollectorRecipeContract.py
+      - run: bandit -q -r apps -ll
+      - run: pip-audit -r apps/requirements.txt --disable-pip --no-deps --progress-spinner off
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m unittest discover -s tests -v
+        env:
+          BILLCOLLECTOR_BROWSER_TESTS: "1"
+
+  container-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Prove runtime artifacts cannot enter Docker context
+        run: python3 tests/check_docker_context.py
+      - run: docker build -f Dockerfile_pw -t billcollector-playwright-assurance .
+      - name: Inspect image and exercise publication rename on one mount
+        run: >-
+          docker run --rm --network none
+          --tmpfs /publication:uid=5678,gid=5678,mode=0700
+          --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
+          --entrypoint python3 billcollector-playwright-assurance /check.py
+      - name: Prove the non-root entrypoint starts and can write its log
+        run: >-
+          docker run --rm --network none
+          --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
+          --entrypoint python3 billcollector-playwright-assurance /check.py --startup
+      - name: Prove host UID mounts support the entrypoint and Chromium
+        run: >-
+          docker run --rm --network none --user 1234:2345
+          --tmpfs /apps/db:uid=1234,gid=2345,mode=0700
+          --tmpfs /var/lib/billcollector/profiles:uid=1234,gid=2345,mode=0700
+          --tmpfs /var/lib/billcollector/publication:uid=1234,gid=2345,mode=0700
+          -e BILLCOLLECTOR_EXPECTED_UID=1234
+          --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
+          --entrypoint python3 billcollector-playwright-assurance /check.py --startup
+      - name: Prove shared-group DMS access without exposing private state
+        run: >-
+          docker run --rm --network none --user 0:0
+          --tmpfs /publication:uid=5678,gid=5678,mode=0711
+          --mount type=bind,source="$GITHUB_WORKSPACE/tests/check_container_contract.py",target=/check.py,readonly
+          --entrypoint python3 billcollector-playwright-assurance /check.py --shared-group

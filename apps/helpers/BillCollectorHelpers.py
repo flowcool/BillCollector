@@ -19,14 +19,17 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))          
 DOWNLOAD_DIR = os.path.join(APP_DIR, "Downloads")                                           # Directory for downloaded files
 INI_DEFAULT_FILE = os.path.join(APP_DIR, "bc_default.ini")                                  # Default INI file
 INI_DEFAULT_TEST_FILE = os.path.join(APP_DIR, "bc_test.ini")                                # Test INI file
-LOG_DEFAULT_FILE = os.path.join(APP_DIR, "bc.log")                                          # Default log file
+LOG_DEFAULT_FILE = os.environ.get("BILLCOLLECTOR_LOG_FILE") or os.path.join(APP_DIR, "bc.log")  # Default log file (override when APP_DIR is read-only)
 
 RECIPES_PLAYWRIGHT_DIR = os.path.join(APP_DIR, "recipes_playwright")                        # Directory for recipes
 RECIPES_PLAYWRIGHT_SCHEMA_FILE = os.path.join(RECIPES_PLAYWRIGHT_DIR, "recipe-pw-schema.yaml")  # Schema file for Playwright recipes
 RECIPES_PLAYWRIGHT_PREFIX = "recipe-pw__"                                                   # Prefix for Playwright recipes
 RECIPES_PLAYWRIGHT_CODE_DIR = os.path.join(RECIPES_PLAYWRIGHT_DIR, ".code")                  # Directory for Playwright python code 
 CHROMIUM_PLAYWRIGHT_DIR = os.path.join(APP_DIR, "browser")                                  # Directory for Chromium Playwright
-CHROMIUM_PLAYWRIGHT_PROFILE = os.path.join(CHROMIUM_PLAYWRIGHT_DIR, "profile")              # Directory for Chromium Playwright profile
+_PROFILE_STATE_HOME = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+CHROMIUM_PLAYWRIGHT_PROFILE = os.environ.get(
+    "BILLCOLLECTOR_PROFILE_DIR", os.path.join(_PROFILE_STATE_HOME, "billcollector", "profiles")
+)                                                                                           # Persistent Chromium profile root
 
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = CHROMIUM_PLAYWRIGHT_DIR                            # Set environment variable for Playwright browsers path
 
@@ -81,8 +84,10 @@ VARIABLE_LABELS = {
 
 # Service variables
 class ServiceObj:
-    def __init__(self, service, usr, pwd, otp, dbg, dld, yml=None, drv=None, page=None, db=None, run_table=None):
+    def __init__(self, service, usr, pwd, otp, dbg, dld, yml=None, drv=None, page=None, db=None, run_table=None,
+                 account_id=None):
         self.service = service
+        self.account_id = account_id
         self.db = db
         self.run_table = run_table
         self.page = page

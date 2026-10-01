@@ -1,1 +1,12 @@
+.git
 **/Downloads
+.env
+**/.env
+**/*.log
+**/.bc_ui_run.json
+**/.code
+apps/profiles
+apps/browser
+apps/db
+apps/Downloads
+**/__pycache__

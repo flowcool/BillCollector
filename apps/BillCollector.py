@@ -14,6 +14,7 @@ import configparser
 from flatten_json import flatten
 
 from BillCollectorServices_pw import retrieve_from_service_with_playwright
+from helpers.BillCollectorRecipeContract import RECIPE_DIR_ENV, RecipeContractError, preflight_external_recipe
 from helpers import *
 
 logger = logging.getLogger(__name__)
@@ -70,14 +71,14 @@ def is_domain_local_ip(domain, try_count=3):
 # Get web content
 def get_json(url):
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
         if 400 <= response.status_code < 500:
             if "No TOTP" in response.text: 
                 pass
             else: 
-                logger.error(f"Client error: {response.status_code} - {response.text}")
+                logger.error("Vault client error: HTTP %s", response.status_code)
                 sys.exit(1)
         else: 
             logger.error(f"Error with request: {e}")
@@ -93,7 +94,6 @@ def get_json(url):
 # Check Bitwarden API status
 def bitwarden_api_check_status(url):
     content = get_json(f"{url}/status")
-    logger.debug(content)
     if not is_json_property_value(content, "success", True): return False, None
     else: 
         if not is_json_property_value(content, "data_template_status", "unlocked"): return True, "locked"
@@ -125,12 +125,16 @@ def is_string_valid(string):
         return False
     
 def post_json(url, payload):
-    response = requests.post(url, json=payload)
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+    except requests.exceptions.RequestException:
+        logger.error("Vault request failed")
+        return False
     if response.status_code == 201 or response.status_code == 200:
         logger.info("Successfully posted!")
         return json.dumps(response.json())
     else:
-        logger.error(f"Error: {response.status_code} - {response.text}")
+        logger.error("Vault request failed: HTTP %s", response.status_code)
         return False
 
 def get_json_property_value(content, prop):
@@ -177,6 +181,7 @@ def WebRetriDoc(self, type=None, service=None):
         sys.exit(1)
     
     matched = False
+    failed = False
     for automation_library in script.sections():
         if automation_library == None: break
         if type != None and automation_library.lower() != type.lower(): continue
@@ -195,7 +200,18 @@ def WebRetriDoc(self, type=None, service=None):
             # handle service variant with list of users in array
             for user in users:
                 service_user = f"{servicename} {user}".strip()
-                logger.info(f"Service {service_user} started.")
+                logger.info("Service %s started", servicename)
+
+                # Reject unapproved recipe bytes/account bindings before any
+                # credential or TOTP lookup. Pass the frozen parsed recipe on.
+                recipe_preflight = None
+                if automation_library.lower() == "playwright" and os.environ.get(RECIPE_DIR_ENV) is not None:
+                    try:
+                        recipe_preflight = preflight_external_recipe(servicename, service_user)
+                    except RecipeContractError:
+                        logger.error("External recipe is not approved for service %s", servicename)
+                        failed = True
+                        continue
 
                 # Retrieve credentials
                 item = get_json(f"{self.api}/object/item/{service_user}")
@@ -208,12 +224,24 @@ def WebRetriDoc(self, type=None, service=None):
 
                 # Download Documents with the help of the appropriate automation library
                 if automation_library.lower() == "playwright":
-                    retrieve_from_service_with_playwright(servicename, uri, username, passsword, totp, self.debug)
+                    if not retrieve_from_service_with_playwright(
+                        servicename, uri, username, passsword, totp, self.debug,
+                        account_id=service_user, recipe_preflight=recipe_preflight,
+                    ):
+                        failed = True
     #
     #################
 
-    if service is not None and not matched:
-        logger.warning(f"Service filter '{service}' matched no service in {self.fname}; nothing was done.")
+    if not matched:
+        logger.warning(f"No service matched (library={type!r}, service={service!r}) in {self.fname}; nothing was done.")
+        return False
+    return not failed
+
+
+def playwright_exit_code(config, service=None):
+    """Return the CLI status for a selected Playwright run."""
+    return 0 if WebRetriDoc(config, "playwright", service) else 1
+
 
 if __name__ == "__main__":
     sys.stdout = sys.__stdout__
@@ -258,4 +286,4 @@ if __name__ == "__main__":
 
     setup_logging(LOG_DEFAULT_FILE, debug=bc.debug)
 
-    WebRetriDoc(bc, "playwright", service)
+    sys.exit(playwright_exit_code(bc, service))

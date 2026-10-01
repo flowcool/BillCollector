@@ -8,6 +8,9 @@ WORKDIR /apps
 
 # Set environment variables
 ENV PLAYWRIGHT_BROWSERS_PATH=/apps/browser
+ENV BILLCOLLECTOR_PROFILE_DIR=/var/lib/billcollector/profiles
+# /apps is root-owned; the non-root runner writes its log and run database here.
+ENV BILLCOLLECTOR_LOG_FILE=/apps/db/bc.log
 
 # Install Python3
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -31,11 +34,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-tlwg-loma-otf fonts-ubuntu \
     && rm -rf /var/lib/apt/lists/*
 
-# Creates a non-root user with an explicit UID and adds permission to access the /apps folder
-# For more info, please refer to https://aka.ms/vscode-docker-python-configure-containers
-# ...and https://code.visualstudio.com/remote/advancedcontainers/add-nonroot-user
-#RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /apps
-#USER appuser
+RUN groupadd --gid 5678 appuser \
+    && useradd --uid 5678 --gid appuser --create-home --shell /usr/sbin/nologin appuser \
+    && install -d -m 0700 -o appuser -g appuser \
+        /var/lib/billcollector/profiles /var/lib/billcollector/publication /apps/db
+
+USER 5678:5678
 
 # Entry point
 CMD ["/bin/bash"]
