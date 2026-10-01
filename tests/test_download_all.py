@@ -56,6 +56,8 @@ class Page(Events):
     def go_back(self, **_kwargs):
         self.back_calls += 1
         self.url = "https://example.test/list"
+        # Model an SPA: the list renders a few polls after DOMContentLoaded.
+        self.listing.blank_snapshots = self.listing.render_delay_snapshots
 
     def is_closed(self):
         return self.closed
@@ -72,13 +74,14 @@ class Item:
     def __init__(self, listing, entry):
         self.listing = listing
         self.entry = entry
+        self.disposed = False
+        listing.handles.append(self)
 
-    def get_attribute(self, name):
-        assert name == "href"
-        return self.entry.get("href")
+    def evaluate(self, _script):
+        return [self.entry.get("href"), self.entry["text"]]
 
-    def text_content(self):
-        return self.entry["text"]
+    def dispose(self):
+        self.disposed = True
 
     def click(self, **_kwargs):
         entry = self.entry
@@ -113,6 +116,9 @@ class Listing:
         self.first = self
         self.snapshot_count = 0
         self.reorder_after_snapshot = None
+        self.render_delay_snapshots = 0
+        self.blank_snapshots = 0
+        self.handles = []
 
     def wait_for(self, **_kwargs):
         pass
@@ -120,12 +126,18 @@ class Listing:
     def count(self):
         return len(self.items)
 
-    def element_handles(self):
+    def evaluate_all(self, _script):
         self.snapshot_count += 1
-        handles = [Item(self, entry) for entry in self.items]
+        if self.blank_snapshots:
+            self.blank_snapshots -= 1
+            return []
+        identities = [[entry.get("href"), entry["text"]] for entry in self.items]
         if self.snapshot_count == self.reorder_after_snapshot:
             self.items.reverse()
-        return handles
+        return identities
+
+    def nth(self, index):
+        return SimpleNamespace(element_handle=lambda **_kwargs: Item(self, self.items[index]))
 
 
 class Publisher:
@@ -159,6 +171,29 @@ class DownloadAllTests(unittest.TestCase):
         self.assertEqual(listing.clicked, [0, 1, 2])
         self.assertEqual(publisher.downloads, ["one", "two", "one"])
         self.assertEqual(bcs.page.back_calls, 1)
+        self.assertTrue(listing.handles and all(handle.disposed for handle in listing.handles))
+
+    def test_list_rendered_late_after_back_navigation_completes(self):
+        bcs, listing, publisher = self.setup_listing([
+            {"href": "/one.pdf", "text": "One", "download": "one", "navigate": True},
+            {"href": "/two.pdf", "text": "Two", "download": "two", "navigate": True},
+            {"href": "/three.pdf", "text": "Three", "download": "three"},
+        ])
+        listing.render_delay_snapshots = 3
+        results = []
+        self.assertIs(download_all_locator(bcs, listing, publisher, 1000, results), results)
+        self.assertEqual(publisher.downloads, ["one", "two", "three"])
+        self.assertEqual(results, [{"result": "published"}] * 3)
+
+    def test_partial_run_keeps_published_outcomes_in_caller_list(self):
+        bcs, listing, publisher = self.setup_listing([
+            {"text": "First", "download": "one"}, {"text": "Second"},
+        ])
+        results = []
+        with self.assertRaisesRegex(RuntimeError, "item 2 of 2 produced 0 files"):
+            download_all_locator(bcs, listing, publisher, 100, results)
+        self.assertEqual(results, [{"result": "published"}])
+        self.assertTrue(all(handle.disposed for handle in listing.handles))
 
     def test_empty_changed_and_partial_lists_fail(self):
         bcs, listing, publisher = self.setup_listing([])
@@ -250,6 +285,7 @@ class DownloadAllTests(unittest.TestCase):
             {"text": "Invoice", "download": "one"},
         ])
         bcs.publisher = publisher
+        bcs.download_results = []
         bcs.external_recipe = False
         step = {"step": 1, "methods": [
             {"method": "locator", "arguments": [{"selector": ".invoice"}]},
@@ -257,7 +293,7 @@ class DownloadAllTests(unittest.TestCase):
         ]}
         state = process_step(bcs, step)
         self.assertFalse(state.error_status)
-        self.assertEqual(state.download_results, [{"result": "published"}])
+        self.assertEqual(bcs.download_results, [{"result": "published"}])
         self.assertEqual(publisher.downloads, ["one"])
 
 
