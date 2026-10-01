@@ -20,6 +20,13 @@ class FakeDownload:
     def failure(self):
         return None
 
+    def path(self):
+        # Stands in for Playwright's temporary download file.
+        descriptor, temporary = tempfile.mkstemp()
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(PDF)
+        return temporary
+
     def save_as(self, path):
         Path(path).write_bytes(PDF)
 

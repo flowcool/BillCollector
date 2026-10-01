@@ -19,7 +19,11 @@ if [[ ! "$HOST_RUN_GID" =~ ^[1-9][0-9]*$ ]]; then
     echo "BILLCOLLECTOR_HOST_SHARED_GID must be a positive numeric GID" >&2
     exit 1
 fi
-if [[ ! -e "$HOST_DB_DIR" && ! -L "$HOST_DB_DIR" ]]; then
+if [[ -L "$HOST_DB_DIR" ]]; then
+    echo "Refusing a symlinked database directory" >&2
+    exit 1
+fi
+if [[ ! -e "$HOST_DB_DIR" ]]; then
     install -d -m 0700 "$HOST_DB_DIR"
 fi
 if [[ ! -d "$HOST_DB_DIR" || ! -w "$HOST_DB_DIR" ]]; then

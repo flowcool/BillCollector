@@ -18,6 +18,8 @@ from download_publication import DownloadPublisher, PublicationError, RunLocked
 
 
 PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
+# Stands in for Playwright's temporary download directory.
+BROWSER_TEMP = tempfile.TemporaryDirectory()
 
 
 class FakeDownload:
@@ -25,9 +27,20 @@ class FakeDownload:
         self.body = body
         self.error = error
         self.saved = False
+        self.waited = False
+        self.canceled = False
 
     def failure(self):
+        self.waited = True
         return self.error
+
+    def cancel(self):
+        self.canceled = True
+
+    def path(self):
+        temporary = Path(BROWSER_TEMP.name) / f"{id(self)}.download"
+        temporary.write_bytes(self.body)
+        return str(temporary)
 
     def save_as(self, path):
         self.saved = True
@@ -340,6 +353,29 @@ class DownloadPublicationTests(unittest.TestCase):
             with self.publisher():
                 pass
         self.assertEqual(db.read_bytes(), b"not a database")
+
+
+    def test_url_policy_and_size_cap_reject_before_output(self):
+        download = FakeDownload()
+        download.url = "https://evil.test/invoice.pdf"
+        with DownloadPublisher(self.state, self.output, self.staging,
+                               accept_url=lambda url: url.startswith("https://good.test/")) as publisher:
+            with self.assertRaisesRegex(PublicationError, "not approved"):
+                publisher.publish(download, service="portal", account="alice")
+            # Refused before waiting for completion, and the transfer is canceled.
+            self.assertTrue(download.canceled)
+            self.assertFalse(download.waited)
+            self.assertFalse(download.saved)
+            download.url = "https://good.test/invoice.pdf"
+            self.assertTrue(publisher.publish(download, service="portal", account="alice"))
+        oversized = FakeDownload(PDF + b"other")
+        with DownloadPublisher(self.state, self.output, self.staging, max_bytes=len(PDF) - 1) as publisher:
+            with self.assertRaisesRegex(PublicationError, "size limit"):
+                publisher.publish(oversized, service="portal", account="bob")
+        # Refused from the browser's temporary file, before any copy to staging.
+        self.assertFalse(oversized.saved)
+        self.assertEqual(len(list(self.output.iterdir())), 1)
+        self.assertEqual(list(self.staging.iterdir()), [])
 
 
 if __name__ == "__main__":

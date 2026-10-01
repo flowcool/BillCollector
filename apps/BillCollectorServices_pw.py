@@ -14,6 +14,7 @@ from helpers.BillCollectorRecipeContract import (
     RECIPE_DIR_ENV,
     RecipeContractError,
     SECRET_PLACEHOLDERS,
+    download_origin,
     https_origin,
     load_playwright_recipe,
     preflight_external_recipe,
@@ -210,6 +211,9 @@ def perform_actions(bcs):
     files_downloaded = []
     with sync_playwright() as p, locked_profile(CHROMIUM_PLAYWRIGHT_PROFILE, bcs.account_id) as profile_dir, publication_context() as publisher:
         try:
+            if getattr(bcs, "external_recipe", False):
+                approved = bcs.allowed_recipe_origins
+                publisher.accept_url = lambda url: download_origin(url) in approved
             bcs.drv = InitBrowser(p, bcs, profile_dir)
             bcs.page = bcs.drv.new_page()
             
@@ -345,6 +349,21 @@ def process_step(bcs, step):
                     raise RecipeContractError(
                         f"credential fill blocked: page origin is not in {EXTERNAL_ORIGINS_ENV}"
                     )
+                # The page origin says nothing about a child frame. Resolve the
+                # element once, require the top-level frame, and fill that handle
+                # so the locator cannot re-resolve to another element.
+                handle = previous_result.element_handle()
+                if handle is None or handle.owner_frame() != bcs.page.main_frame:
+                    raise RecipeContractError("credential fill blocked: element is not in the top-level page")
+                # element_handle() waits, and the main frame keeps its identity
+                # across navigations: check the origin of the element's own
+                # document. A later navigation detaches the handle, so fill fails.
+                document_url = handle.evaluate("element => element.ownerDocument.location.href")
+                if https_origin(document_url) not in bcs.allowed_recipe_origins:
+                    raise RecipeContractError(
+                        f"credential fill blocked: element origin is not in {EXTERNAL_ORIGINS_ENV}"
+                    )
+                previous_result = handle
         processed_args = [process_argument(arg, bcs) for arg in arguments]
 
         if not method_name:

@@ -168,3 +168,13 @@ class WrapperContractTests(unittest.TestCase):
                 result, arguments = self.run_wrapper(**overrides)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIsNone(arguments, "docker must not run after validation fails")
+
+    def test_symlinked_database_directory_never_invokes_docker(self):
+        db = self.root / "apps" / "db"
+        target = self.root / "elsewhere"
+        db.rename(target)
+        db.symlink_to(target, target_is_directory=True)
+        result, arguments = self.run_wrapper()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlinked database", result.stderr)
+        self.assertIsNone(arguments)
