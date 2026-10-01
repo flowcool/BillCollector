@@ -280,6 +280,7 @@ class RecipeContractTests(unittest.TestCase):
         ]}
         handle = locator.element_handle.return_value
         handle.owner_frame.return_value = page.main_frame
+        handle.evaluate.return_value = "https://example.test/login"
         with patch("BillCollectorServices_pw.PageState"):
             with self.assertRaisesRegex(RecipeContractError, "credential fill blocked"):
                 process_step(bcs, step)
@@ -296,6 +297,12 @@ class RecipeContractTests(unittest.TestCase):
             page.url = "https://example.test/login"
             handle.owner_frame.return_value = Mock(name="child frame")
             with self.assertRaisesRegex(RecipeContractError, "not in the top-level page"):
+                process_step(bcs, step)
+            handle.fill.assert_called_once_with(value="secret")
+            # The element was resolved after a navigation: its document origin decides.
+            handle.owner_frame.return_value = page.main_frame
+            handle.evaluate.return_value = "https://evil.test/login"
+            with self.assertRaisesRegex(RecipeContractError, "element origin"):
                 process_step(bcs, step)
             handle.fill.assert_called_once_with(value="secret")
 

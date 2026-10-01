@@ -36,6 +36,11 @@ class RunnerContractTests(unittest.TestCase):
             def failure(self):
                 return None
 
+            def path(self):
+                temporary = Path(directory) / "browser-download"
+                temporary.write_bytes(self.body)
+                return str(temporary)
+
             def save_as(self, path):
                 Path(path).write_bytes(self.body)
 

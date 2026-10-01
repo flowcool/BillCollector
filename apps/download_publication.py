@@ -142,11 +142,18 @@ class DownloadPublisher:
         if self._db is None or not service or not account:
             raise PublicationError("An active run and stable service/account are required")
         account_hash = hashlib.sha256(f"{service}\0{account}".encode()).hexdigest()
+        # Refuse before failure(): it waits for completion, and a refused
+        # origin could stream forever.
+        if self.accept_url is not None and not self.accept_url(download.url):
+            download.cancel()
+            raise PublicationError("Download URL is not approved for publication")
         failure = download.failure()  # Waits for browser download completion.
         if failure is not None:
             raise PublicationError("Browser reported a failed download")
-        if self.accept_url is not None and not self.accept_url(download.url):
-            raise PublicationError("Download URL is not approved for publication")
+        # Playwright has no in-flight byte cap; refuse before copying the
+        # browser's temporary file. The hard bound is a storage quota.
+        if os.path.getsize(download.path()) > self.max_bytes:
+            raise PublicationError("Downloaded artifact exceeds the publication size limit")
 
         stage_name = f"{uuid.uuid4().hex}.part"
         stage = self.stage_dir / stage_name
