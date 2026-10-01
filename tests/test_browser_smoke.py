@@ -250,8 +250,10 @@ class BrowserSmokeTests(unittest.TestCase):
                                       external_recipe=True,
                                       allowed_recipe_origins=frozenset({"https://approved.test"}))
                 # Map the loopback HTTP origins: only the first server is approved.
-                origin = lambda url: ("https://approved.test" if str(url).startswith(approved_prefix)
-                                      else "https://other.test")
+                def origin(url):
+                    approved = str(url).startswith(approved_prefix)
+                    return "https://approved.test" if approved else "https://other.test"
+
                 with patch.object(runner, "https_origin", side_effect=origin):
                     with self.assertRaisesRegex(runner.RecipeContractError, "element origin"):
                         runner.process_step(bcs, step)
