@@ -65,7 +65,40 @@ services:
 
 Save this as `recipe-pw__sample.yaml`. The loader always uses the engine's
 bundled schema. Legacy `$schema` values, including the absolute paths currently
-present in bundled examples, are ignored at runtime. Validate without a browser:
+present in bundled examples, are ignored at runtime.
+
+For an invoice list, use `download_all` as the final method on a locator:
+
+```yaml
+- step: 5
+  methods:
+    - method: locator
+      arguments:
+        - selector: ".invoice-download"
+    - method: download_all
+      arguments:
+        - timeout_ms: 10000
+```
+
+`download_all` clicks every matching link or control, including links that open
+a new tab. It re-queries the full locator after each click, checks the list's
+order, and clicks a stable element reference. Identical `(href, text)` pairs
+are rejected before any click; choose a narrower locator for such a portal.
+It restores the listing after navigation. `download_all` cannot be nested under
+`expect_download`. Each control must start exactly one download: the runner
+waits up to `timeout_ms` for the first event, then observes a further 500 ms
+for a second event. Zero or multiple events in those windows fail the service.
+An empty, changed, or partially downloaded list also fails. The optional
+`timeout_ms` is in milliseconds (100 to 120000; default 30000). A second
+download started more than 500 ms after the first is outside this contract and
+may be missed; that portal needs a dedicated action or an agreed event policy.
+Each completed file goes through the existing content-based publisher, so
+already published PDFs are reported as duplicates. Unlike Selenium's URL-based
+pre-skip, controls are clicked on every run to obtain and hash their bytes.
+On partial failure, the service run is recorded as failed with the number of
+files already processed; any published PDF remains safely deduplicated on retry.
+
+Validate without a browser:
 
 ```sh
 BILLCOLLECTOR_EXTERNAL_RECIPE_ORIGINS=https://example.test \

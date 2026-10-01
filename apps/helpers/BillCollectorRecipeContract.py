@@ -45,6 +45,7 @@ METHOD_ARGUMENTS = {
     "first": ({}, {}),
     "content_frame": ({}, {}),
     "expect_download": ({}, {}),
+    "download_all": ({}, {"timeout_ms": int}),
     "close": ({}, {}),
 }
 LOCATOR_METHODS = {
@@ -55,6 +56,7 @@ METHOD_RECEIVERS = {
     **{method: {"page", "locator", "frame_locator"} for method in LOCATOR_METHODS},
     "goto": {"page"},
     "expect_download": {"page"},
+    "download_all": {"locator"},
     "close": {"page"},
     "content_frame": {"locator"},
     "first": {"locator"},
@@ -124,7 +126,7 @@ def external_recipe_origins(value=None):
     return frozenset(origins)
 
 
-def _validate_steps(steps, location, capabilities, allowed_origins=None):
+def _validate_steps(steps, location, capabilities, allowed_origins=None, *, in_download=False):
     if not isinstance(steps, list) or not steps:
         raise RecipeContractError(f"{location}: steps must be a non-empty list")
     for index, step in enumerate(steps):
@@ -165,6 +167,8 @@ def _validate_steps(steps, location, capabilities, allowed_origins=None):
                 expected_type = (required | optional)[key]
                 if not isinstance(value, expected_type) or (expected_type is str and not value):
                     raise RecipeContractError(f"{method_where}: invalid {key!r} value")
+                if key == "timeout_ms" and (type(value) is not int or not 100 <= value <= 120_000):
+                    raise RecipeContractError(f"{method_where}: timeout_ms must be 100..120000")
                 if (allowed_origins is not None and value in SECRET_PLACEHOLDERS
                         and (method != "fill" or key != "value")):
                     raise RecipeContractError(f"{method_where}: credentials are only allowed in fill(value)")
@@ -179,6 +183,10 @@ def _validate_steps(steps, location, capabilities, allowed_origins=None):
                     raise RecipeContractError(f"{method_where}: goto requires an HTTP(S) URL") from exc
                 if allowed_origins is not None and https_origin(arguments["url"]) not in allowed_origins:
                     raise RecipeContractError(f"{method_where}: goto origin is not allowed")
+            if method == "download_all" and "download" not in capabilities:
+                raise RecipeContractError(f"{method_where}: download capability is required")
+            if method == "download_all" and in_download:
+                raise RecipeContractError(f"{method_where}: download_all cannot be nested under expect_download")
             if method in LOCATOR_METHODS:
                 receiver = "locator"
             elif method == "content_frame":
@@ -191,7 +199,7 @@ def _validate_steps(steps, location, capabilities, allowed_origins=None):
         nested = step.get("steps")
         expects_download = any(entry["method"] == "expect_download" for entry in methods)
         if expects_download:
-            _validate_steps(nested, where, capabilities, allowed_origins)
+            _validate_steps(nested, where, capabilities, allowed_origins, in_download=True)
         elif nested is not None:
             raise RecipeContractError(f"{where}: nested steps require expect_download")
 

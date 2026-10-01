@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import json
 import sys
+import time
 from pathlib import Path
 
 from datetime import datetime
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 PUBLICATION_ROOT_ENV = "BILLCOLLECTOR_PUBLICATION_ROOT"
 PUBLICATION_SHARED_GID_ENV = "BILLCOLLECTOR_PUBLICATION_SHARED_GID"
+DOWNLOAD_SETTLE_MS = 500
 
 
 def publication_context():
@@ -210,6 +212,7 @@ def perform_actions(bcs):
     files_downloaded = []
     with sync_playwright() as p, locked_profile(CHROMIUM_PLAYWRIGHT_PROFILE, bcs.account_id) as profile_dir, publication_context() as publisher:
         try:
+            bcs.publisher = publisher
             bcs.drv = InitBrowser(p, bcs, profile_dir)
             bcs.page = bcs.drv.new_page()
             
@@ -221,6 +224,7 @@ def perform_actions(bcs):
                 bcs.db = DatabaseManager(DB_FILE)
                 bcs.run_table = None
                 service_files = []
+                bcs.download_all_results = service_files
                 run_result = "failure"
                 try:
                     bcs.run_table = bcs.db.create_service_run_table(service_name)
@@ -274,6 +278,79 @@ def perform_actions(bcs):
                 raise RuntimeError("Browser cleanup failed")
     return files_downloaded
 
+
+def download_all_locator(bcs, locator, publisher, timeout_ms=30_000):
+    """Click each match and require one download event per control.
+
+    Re-query the list after navigation, then click its stable ElementHandle.
+    A changed order, count, or identity fails before clicking another item.
+    """
+    page = bcs.page
+    locator.first.wait_for(state="attached", timeout=timeout_ms)
+
+    def snapshot():
+        handles = locator.element_handles()
+        return handles, [(handle.get_attribute("href"), handle.text_content())
+                         for handle in handles]
+
+    _handles, identities = snapshot()
+    count = len(identities)
+    if not count:
+        raise RuntimeError("Download list is empty")
+    if len(set(identities)) != count:
+        raise RuntimeError("Download list contains ambiguous duplicate controls")
+    results = []
+    for index in range(count):
+        handles, current_identities = snapshot()
+        if current_identities != identities:
+            raise RuntimeError(f"Download list changed after {index} of {count} items")
+        # Unlike locator.nth(index), an ElementHandle cannot silently retarget
+        # a different row if the DOM reorders before the native click.
+        target = handles[index]
+        listing_url = page.url
+        downloads = []
+        popups = []
+
+        def on_download(download):
+            downloads.append(download)
+
+        def on_page(new_page):
+            popups.append(new_page)
+            new_page.on("download", on_download)
+
+        page.on("download", on_download)
+        bcs.drv.on("page", on_page)
+        try:
+            target.click(timeout=timeout_ms)
+            deadline = time.monotonic() + timeout_ms / 1000
+            while not downloads and time.monotonic() < deadline:
+                page.wait_for_timeout(min(50, max(1, int((deadline - time.monotonic()) * 1000))))
+            # One control has one file. Observe a short fixed interval after
+            # the first event to reject a second event from the same click.
+            settle_deadline = time.monotonic() + DOWNLOAD_SETTLE_MS / 1000
+            while len(downloads) == 1 and time.monotonic() < settle_deadline:
+                page.wait_for_timeout(min(50, max(1, int((settle_deadline - time.monotonic()) * 1000))))
+            if len(downloads) != 1:
+                raise RuntimeError(
+                    f"Download item {index + 1} of {count} produced {len(downloads)} files; expected one"
+                )
+            published = publisher.publish(downloads[0], service=bcs.service, account=bcs.account_id)
+            outcome = {"result": "published" if published else "duplicate"}
+            results.append(outcome)
+            if hasattr(bcs, "download_all_results"):
+                bcs.download_all_results.append(outcome)
+        finally:
+            page.remove_listener("download", on_download)
+            bcs.drv.remove_listener("page", on_page)
+            for popup in popups:
+                if not popup.is_closed():
+                    popup.close()
+            if page.url != listing_url:
+                page.go_back(wait_until="domcontentloaded", timeout=timeout_ms)
+                if page.url != listing_url:
+                    raise RuntimeError("Download listing could not be restored")
+    return results
+
 def process_step(bcs, step):
     """ Processes a step by executing a chain of methods """
 
@@ -312,7 +389,7 @@ def process_step(bcs, step):
                 continue  # Skip invalid methods
 
             # Categorize as locator or action (just a simple heuristic based on action names)
-            if method_name in ["click", "fill", "expect_download", "goto", "close", "content_frame", "first"]:
+            if method_name in ["click", "fill", "expect_download", "download_all", "goto", "close", "content_frame", "first"]:
                 transformed_step["actions"].append({"action": method_name})
             else: # all other methods are considered locators
                 transformed_step["locators"].append({"locator": method_name})
@@ -331,6 +408,7 @@ def process_step(bcs, step):
 
     page_state = PageState(bcs.service, step_number, bcs.page)
     page_state.set_locator_action(transform_step_to_json(step))
+    page_state.download_results = []
 
     for method_entry in step["methods"]:
         method_name = method_entry.get("method")
@@ -362,6 +440,12 @@ def process_step(bcs, step):
         else:
             method_executor = getattr(previous_result, method_name, None)
             try:
+                if method_name == "download_all":
+                    timeout_ms = processed_args[0]["timeout_ms"] if processed_args else 30_000
+                    page_state.download_results = download_all_locator(
+                        bcs, previous_result, bcs.publisher, timeout_ms
+                    )
+                    break
                 if method_executor is None:
                     raise AttributeError(f"Method '{method_name}' not found on {type(previous_result).__name__}.")
                 if callable(method_executor):
