@@ -1,0 +1,6 @@
+name: BillCollector application and workflow analysis
+
+# This loopback-only mock simulates redirects and cookies for browser scenarios.
+# Keep the application, other tests and mock launcher in the analysis scope.
+paths-ignore:
+  - tests/mock_portal/app.py

@@ -11,7 +11,9 @@ runtime dependency vulnerabilities, CodeQL for Python and Actions, and the built
 container. GitHub schedules use UTC and execute the default branch's workflow.
 
 Bandit records medium and high findings and rejects high-severity findings.
-CodeQL and Trivy findings are available in GitHub code scanning. Image publication
+CodeQL and Trivy findings are available in GitHub code scanning. CodeQL excludes
+only `tests/mock_portal/app.py`, the synthetic portal served on loopback by
+`tests/mock_portal/__main__.py`; application code and other tests remain scanned. Image publication
 rejects fixable HIGH/CRITICAL vulnerabilities; unresolved lower-severity and
 unfixed findings remain visible for review. Scanner success does not establish
 that an application is vulnerability-free.
