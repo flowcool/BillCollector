@@ -1,0 +1,37 @@
+version: 2
+updates:
+- package-ecosystem: pip
+  directories:
+  - /apps
+  - /.github
+  schedule:
+    interval: weekly
+    day: tuesday
+    time: 07:00
+    timezone: Europe/Zurich
+  open-pull-requests-limit: 3
+  groups:
+    python-updates:
+      patterns:
+      - '*'
+      applies-to: version-updates
+    python-security:
+      patterns:
+      - '*'
+      applies-to: security-updates
+  labels:
+  - dependencies
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: weekly
+    day: tuesday
+    time: 07:00
+    timezone: Europe/Zurich
+  open-pull-requests-limit: 2
+  groups:
+    actions-updates:
+      patterns:
+      - '*'
+  labels:
+  - dependencies
