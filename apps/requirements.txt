@@ -5,7 +5,7 @@ dnspython==2.6.1
 exceptiongroup==1.2.2
 flatten-json==0.1.14
 h11==0.14.0
-idna==3.10
+idna==3.15
 importlib-resources==6.4.5
 jsonschema==4.23.0
 jsonschema-specifications==2023.12.1
