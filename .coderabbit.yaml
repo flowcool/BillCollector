@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
+language: en-US
+inheritance: true
+reviews:
+  profile: chill
+  poem: false
+  in_progress_fortune: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "apps/**/*.py"
+      instructions: >-
+        Prioritize collection correctness, bounded waits and retries, optional
+        authentication flows, and cleanup of browser resources on failure.
+        Check that repeated runs do not download or publish duplicate documents
+        and that failed downloads cannot be marked successful. Flag credentials,
+        session data, private portal URLs or customer data in logs and artifacts.
+        Preserve compatibility with existing recipes and state files.
+    - path: "tests/**/*.py"
+      instructions: >-
+        Require synthetic credentials, mocked portals or isolated fixtures,
+        download directories and state. Flag tests that reach live customer
+        portals, vaults or document consumers. Cover repeated runs and failure
+        paths when collection behavior changes.
+chat:
+  art: false
