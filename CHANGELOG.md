@@ -11,6 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Deploys now reuse the BuildKit layer cache: the changing `REVISION` build
+  arg (its value is part of the cache key of every `RUN` step, so it
+  invalidated the whole cache on every deploy) is gone from
+  `install_docker-image.sh`, and the `Dockerfile` installs the Python
+  dependencies and the Playwright browser before copying the application
+  code. A code-only deploy re-runs just the final `COPY` + `chown`; a
+  doc-only deploy builds all-`CACHED`.
 - The docker image now runs as a non-root user (UID/GID 1000, overridable via
   the `APP_UID`/`APP_GID` build args) with container hardening aligned to the
   flowcool fork: OCI image labels, `VOLUME /apps/Downloads`, dedicated `HOME`,
@@ -26,6 +33,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Legacy Selenium `Dockerfile`; `Dockerfile_pw` renamed to `Dockerfile` (the
   single Playwright/Chromium image).
+- The `org.opencontainers.image.revision` OCI image label (fed by the
+  `REVISION` build arg); the deployed commit is recorded in the deploy log
+  instead (`deploy_remote.sh` prints `git log -1`).
 
 ### Fixed
 
@@ -34,6 +44,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   failing vault status is logged as its parsed state only.
 - `setup_logging` silences the `urllib3` logger in every entry point: its DEBUG
   records contain request URLs with private vault item names.
+- Exclude local credentials, logs, browser sessions and other runtime artifacts
+  from Docker build contexts; retain example configuration and source fixtures.
+  Check: `python3 tests/check_docker_context.py` (Docker with BuildKit).
+- **Breaking:** the image no longer contains `apps/.env`. `BillCollector.sh`
+  mounts it read-only at `/apps/.env`; a direct `docker run`, compose file or
+  scheduler must add the same mount.
 
 ## [v0.4] - 2026-10-02
 

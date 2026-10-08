@@ -132,7 +132,6 @@ jobs:
           tags: billcollector-playwright:ci
           build-args: |
             VERSION=${{ github.ref_name }}
-            REVISION=${{ github.sha }}
             SOURCE=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
