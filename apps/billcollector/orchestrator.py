@@ -196,12 +196,23 @@ class Orchestrator:
             settle_attempt(self._db, run["task_id"], run["id"])
             if run["display"] is not None:
                 display.remove_display_lock(run["display"])
-            self._db.set_task_status(run["task_id"], "idle")
+            self._db.release_task_run(run["task_id"])
             count += 1
             logger.info("orphan cleanup: run %s (task %s, pid %s) marked interrupted",
                         run["id"], run["task_id"], run["pid"])
         if count:
             logger.info("orphan cleanup: %d leftover run(s) interrupted", count)
+        # A crash can land after Run finalization but before attempt settlement.
+        # Such a row is no longer part of list_active_runs(). A live orphan
+        # runner still owns its pending proof, even when its row is finalized.
+        for task in self._db.list_tasks():
+            pending = task["login_pending_run_id"]
+            if pending is None:
+                continue
+            run = self._db.get_run(pending)
+            if run is not None and run["pid"] is not None and _pid_alive(run["pid"]):
+                continue
+            settle_attempt(self._db, task["id"], pending)
         return count
 
     async def shutdown(self) -> None:
@@ -232,7 +243,7 @@ class Orchestrator:
             if row is not None and row["result"] is None:
                 self._db.update_run(row["id"], result="interrupted", ended_at=now())
                 settle_attempt(self._db, task_id, row["id"])
-            self._db.set_task_status(task_id, "idle")
+            self._db.release_task_run(task_id)
             logger.info("shutdown: runner for task %s terminated (pid %s)",
                         task_id, proc.pid)
         # All runners are reaped: their monitors now finish (per-run log
@@ -314,7 +325,7 @@ class Orchestrator:
             # The job was cancelled while waiting for the global slot:
             # release the claim so the task is not wedged in 'running'
             # without a run (the startup orphan cleanup only sees rows).
-            self._db.set_task_status(task_id, "idle")
+            self._db.release_task_run(task_id)
             raise
         try:
             proc = await self._spawn(task_id)
@@ -322,14 +333,14 @@ class Orchestrator:
             # Cancelled between the claim and the spawn: release slot +
             # claim (the runner never started).
             self._semaphore.release()
-            self._db.set_task_status(task_id, "idle")
+            self._db.release_task_run(task_id)
             raise
         except Exception as e:
             # The runner never started: release the claim so the task is
             # not wedged in 'running' (a started runner normally releases
             # it in its own teardown, but there is no runner here).
             self._semaphore.release()
-            self._db.set_task_status(task_id, "idle")
+            self._db.release_task_run(task_id)
             logger.error("start_run: spawning the runner for task %s failed: %s",
                          task_id, e)
             return None
@@ -442,7 +453,7 @@ class Orchestrator:
             # The runner exited before creating its Run row (invalid
             # recipe, display allocation): it never took ownership of the
             # task, so the orchestrator releases the claim.
-            self._db.set_task_status(task_id, "idle")
+            self._db.release_task_run(task_id)
             logger.warning("start_run: no Run row for task %s (pid %s, exit %s); "
                            "runner output tail: %s", task_id, pid, exit_code,
                            "".join(tail).strip() or "(none)")
@@ -465,7 +476,6 @@ class Orchestrator:
             else:
                 updates["result"] = "failure"
             updates["ended_at"] = now()
-            self._db.set_task_status(task_id, "idle")
         if exit_code > 0:
             # A real non-zero exit: append the traceback tail (a
             # signal-killed runner has no traceback, only what it printed
@@ -476,5 +486,6 @@ class Orchestrator:
                 updates["notes"] = (existing + "\n" if existing else "") + notes_tail
         if updates:
             self._db.update_run(run_id, **updates)
+        self._db.release_task_run(task_id)
         logger.info("runner for task %s (run %s) exited with code %s",
                     task_id, run_id, exit_code)

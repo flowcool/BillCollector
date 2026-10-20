@@ -199,6 +199,14 @@ class Database:
         self.conn.commit()
         return cur.rowcount == 1
 
+    def release_task_run(self, task_id):
+        """Do not let a rejected contender release another runner's task."""
+        self.conn.execute(
+            """UPDATE Task SET status='idle', updated_at=? WHERE id=?
+               AND NOT EXISTS (SELECT 1 FROM Run WHERE task_id=? AND result IS NULL)""",
+            (now(), task_id, task_id))
+        self.conn.commit()
+
     def reserve_login_attempt(self, task_id, run_id, limit):
         """Commit the attempt before dispatch. An uncertain submit consumes it."""
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
@@ -238,8 +246,11 @@ class Database:
         cur = self.conn.execute(
             """UPDATE Task SET login_failures=0, login_locked=0,
                    login_pending_run_id=NULL, updated_at=? WHERE id=?
-                   AND (login_pending_run_id IS NULL OR login_pending_run_id=?)""",
-            (now(), task_id, run_id))
+                   AND login_locked=0
+                   AND (login_pending_run_id IS NULL OR login_pending_run_id=?)
+                   AND EXISTS (SELECT 1 FROM Run WHERE id=? AND task_id=?
+                               AND result IS NULL)""",
+            (now(), task_id, run_id, run_id, task_id))
         self.conn.commit()
         return cur.rowcount == 1
 

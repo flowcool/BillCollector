@@ -1,11 +1,17 @@
 """Issue #20: isolated durable budget, entry guards and real loopback submits."""
 
 import copy
+import fcntl
+import socket
 import sqlite3
+import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 from unittest import mock
 
 import pytest
@@ -48,8 +54,8 @@ def login_step():
     return {
         "step": 2,
         "methods": [{"method": "login", "arguments": [
-            {"success": {"selector": "#account"}}, {"timeout_ms": 50},
-            {"session_timeout_ms": 50}]}],
+            {"success": {"selector": "#account"}}, {"timeout_ms": 500},
+            {"session_timeout_ms": 1000}]}],
         "steps": [{"step": 21, "methods": [
             {"method": "locator", "arguments": [{"selector": "#password"}]},
             {"method": "fill", "arguments": [{"value": "synthetic-password"}]}]}],
@@ -81,17 +87,19 @@ def test_durable_crash_budget_one_attempt_clear_and_success(db):
     assert not db.claim_task_run(task)  # pending survives admission, even if idle
     assert not settle_attempt(db, task, run)
     assert not db.settle_login_attempt(task, run)  # idempotent
-    assert db.reserve_login_attempt(task, run + 1, 2)
+    second = db.create_run(task)
+    assert db.reserve_login_attempt(task, second, 2)
     path = db.path
     other = Database(path)
-    assert settle_attempt(other, task, run + 1)
+    assert settle_attempt(other, task, second)
     assert not other.claim_task_run(task)
-    assert not other.reserve_login_attempt(task, run + 2, 2)
+    third = other.create_run(task)
+    assert not other.reserve_login_attempt(task, third, 2)
     assert other.clear_login_lock(task)
     assert other.get_task(task)["login_failures"] == 1
     assert other.get_task(task)["enabled"] == 1
-    assert other.reserve_login_attempt(task, run + 2, 2)
-    other.login_succeeded(task, run + 2)
+    assert other.reserve_login_attempt(task, third, 2)
+    other.login_succeeded(task, third)
     assert other.get_task(task)["login_failures"] == 0
     assert other.get_task(task)["login_pending_run_id"] is None
     other.close()
@@ -202,7 +210,7 @@ def test_valid_contract_accepted():
 
 @pytest.fixture
 def portal():
-    state = SimpleNamespace(submissions=0, success=False)
+    state = SimpleNamespace(submissions=0, success=False, accept_submissions=False)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -219,6 +227,8 @@ def portal():
 
         def do_POST(self):
             state.submissions += 1
+            if state.accept_submissions:
+                state.success = True
             self.rfile.read(int(self.headers.get("Content-Length", "0")))
             self.send_response(303)
             self.send_header("Location", "/")
@@ -240,6 +250,8 @@ def browser_ctx(db, portal):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page()
+        page.route("**/*", lambda route: route.continue_()
+                   if urlsplit(route.request.url).hostname == "127.0.0.1" else route.abort())
         page.goto(portal.url)
         context = SimpleNamespace(db=db, task=db.get_task(task), run_id=run, page=page,
                                   debug=False, bcs=SimpleNamespace(page=page, service="mock"))
@@ -287,6 +299,7 @@ def test_real_browser_threshold_blocks_and_clear_grants_one_attempt(browser_ctx,
 def test_real_browser_existing_session_skips_and_resets(browser_ctx, portal):
     portal.success = True
     browser_ctx.page.goto(portal.url)
+    browser_ctx.page.locator("#account").wait_for(state="visible")
     browser_ctx.db.update_task(browser_ctx.task["id"], login_failures=1)
     runner._execute_login(browser_ctx, login_step())
     assert portal.submissions == 0
@@ -310,3 +323,128 @@ def test_prepare_failure_never_consumes_attempt(browser_ctx, portal):
             runner._execute_login(browser_ctx, login_step())
     assert portal.submissions == 0
     assert browser_ctx.db.get_task(browser_ctx.task["id"])["login_failures"] == 0
+
+
+def test_external_socket_transport_is_denied():
+    with socket.socket() as connection, pytest.raises(AssertionError, match="loopback"):
+        connection.connect(("192.0.2.1", 443))
+
+
+def test_concurrent_direct_entry_stops_before_task_execution(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    directory = tmp_path / "task-locks"
+    directory.mkdir()
+    with (directory / "task-7.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with mock.patch.object(runner, "_run_task") as execute:
+            assert runner.run_task(7) == 1
+            execute.assert_not_called()
+    with mock.patch.object(runner, "_run_task", return_value=0) as execute:
+        assert runner.run_task(7) == 0
+        execute.assert_called_once_with(7, False)
+
+
+def test_rejected_contender_cannot_release_active_task(db):
+    task, run = task_run(db)
+    db.set_task_status(task, "running")
+    Orchestrator(db)._finalize_run(task, 98765, 1, [])
+    assert db.get_task(task)["status"] == "running"
+    db.update_run(run, result="interrupted")
+    db.release_task_run(task)
+    assert db.get_task(task)["status"] == "idle"
+
+
+def test_foreign_or_completed_run_cannot_reset_budget(db):
+    task, run = task_run(db)
+    other_task = db.create_task("other", "synthetic")
+    foreign = db.create_run(other_task)
+    db.reserve_login_attempt(task, run, 2)
+    assert not db.login_succeeded(task, foreign)
+    db.update_run(run, result="failure")
+    assert not db.login_succeeded(task, run)
+    assert db.get_task(task)["login_failures"] == 1
+
+
+def test_limit_cannot_increase_to_bypass_clear_budget(db):
+    task, run = task_run(db)
+    assert db.reserve_login_attempt(task, run, 2)
+    settle_attempt(db, task, run)
+    second = db.create_run(task)
+    assert db.reserve_login_attempt(task, second, 9)
+    assert db.get_task(task)["login_failure_limit"] == 2
+    assert settle_attempt(db, task, second)
+    assert db.clear_login_lock(task)
+    third = db.create_run(task)
+    assert db.reserve_login_attempt(task, third, 9)
+    assert settle_attempt(db, task, third)
+
+
+def test_notification_is_mocked_and_sent_once_per_block(db):
+    task, run = task_run(db)
+    db.set_setting("ntfy_topic", "synthetic-test-only")
+    assert db.reserve_login_attempt(task, run, 1)
+    with mock.patch("billcollector.notify.requests.post",
+                    return_value=SimpleNamespace(status_code=200)) as post:
+        assert settle_attempt(db, task, run)
+        assert settle_attempt(db, task, run)
+    post.assert_called_once()
+    assert "blocked after 1" in post.call_args.kwargs["data"].decode()
+
+
+def test_submission_exception_never_replays_and_consumes_budget(browser_ctx):
+    step = login_step()
+    step["steps"] = []
+    with mock.patch.object(runner, "_execute_step", side_effect=RuntimeError("synthetic")) as submit, \
+            mock.patch.object(runner, "pause_loop", return_value="cancel"):
+        with pytest.raises(runner.PauseOutcomeAbort):
+            runner._execute_login(browser_ctx, step)
+    submit.assert_called_once()
+    assert browser_ctx.db.get_task(browser_ctx.task["id"])["login_failures"] == 1
+    assert browser_ctx.db.get_task(browser_ctx.task["id"])["login_pending_run_id"] is None
+
+
+def test_dispatcher_runs_login_and_continues_only_after_success(browser_ctx, portal):
+    ctx = browser_ctx
+    ctx.context = ctx.page.context
+    ctx.bcs.usr = "synthetic"
+    ctx.files_downloaded = []
+    portal.accept_submissions = True
+    after_login = {"step": 3, "methods": [{"method": "wait_for_timeout",
+                                            "arguments": [{"timeout": 1}]}]}
+    recipe = {"services": [{"serviceName": "mock", "steps": [login_step(), after_login]}]}
+    with mock.patch.object(runner, "sync_playwright", return_value=nullcontext(None)), \
+            mock.patch.object(runner, "_launch_browser"), \
+            mock.patch.object(runner, "pause_loop") as pause:
+        _, aborted, outcome = runner._run_recipe(ctx, recipe)
+    assert not aborted and outcome is None
+    pause.assert_not_called()
+    assert portal.submissions == 1
+    assert ctx.db.get_task(ctx.task["id"])["login_failures"] == 0
+    assert any(row["step_number"] == 3 for row in ctx.db.list_page_status(ctx.run_id))
+
+
+def test_process_crash_after_reservation_recovers_without_replay(db):
+    task, run = task_run(db)
+    script = (
+        "import os,sys; from billcollector.db import Database; "
+        "db=Database(sys.argv[1]); "
+        "assert db.reserve_login_attempt(int(sys.argv[2]),int(sys.argv[3]),1); "
+        "os._exit(9)"
+    )
+    process = subprocess.run([sys.executable, "-c", script, db.path, str(task), str(run)],
+                             cwd=str(config.APP_DIR), check=False)
+    assert process.returncode == 9
+    assert db.get_task(task)["login_pending_run_id"] == run
+    Orchestrator(db).cleanup_orphans()
+    assert db.get_task(task)["login_failures"] == 1
+    assert db.get_task(task)["login_locked"] == 1
+    assert not db.claim_task_run(task)
+
+
+def test_crash_between_finalization_and_settlement_recovers(db):
+    task, run = task_run(db)
+    db.reserve_login_attempt(task, run, 1)
+    db.update_run(run, result="failure")
+    assert Orchestrator(db).cleanup_orphans() == 0
+    assert db.get_task(task)["login_pending_run_id"] is None
+    assert db.get_task(task)["login_locked"] == 1

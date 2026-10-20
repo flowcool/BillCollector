@@ -32,6 +32,7 @@ RunInterrupted, the teardown reaps the display stack and releases the
 claim, and the run ends ``result=interrupted``.
 """
 
+import fcntl
 import json
 import logging
 import os
@@ -819,6 +820,25 @@ def _run_recipe(ctx, recipe):
 
 
 def run_task(task_id: int, debug: bool = False) -> int:
+    """Serialize all runner entries, including direct CLI invocations.
+
+    A process-held lock survives neither crash nor SIGKILL, and must never be
+    unlinked (a new inode could allow another runner to pass the same lock).
+    """
+    config.load_env()
+    config.ensure_dirs()
+    lock_dir = config.DATA_DIR / "task-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    with (lock_dir / f"task-{int(task_id)}.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("runner: task already has an active runner", file=sys.stderr)
+            return 1
+        return _run_task(task_id, debug)
+
+
+def _run_task(task_id: int, debug: bool = False) -> int:
     """Execute one task run (sync Playwright step loop).
 
     Returns the process exit code: 0 on success, 1 on a run failure
@@ -875,6 +895,7 @@ def run_task(task_id: int, debug: bool = False) -> int:
             run_id = db.create_run(task_id, pid=os.getpid(),
                                    display=display_number,
                                    novnc_port=websockify_port)
+            db.set_task_status(task_id, "running")
             try:
                 children = _start_display_stack(db, run_id, display_number)
                 os.environ["DISPLAY"] = f":{display_number}"
@@ -916,7 +937,7 @@ def run_task(task_id: int, debug: bool = False) -> int:
                 # set by a pause is terminal here (resume, cancel and
                 # timeout all end the run), so the task goes back to idle
                 # and the scheduler's row lock can claim it again.
-                db.set_task_status(task_id, "idle")
+                db.release_task_run(task_id)
         finally:
             # The claim is released with the run, so a finished (or
             # interrupted) run never leaks a display - even when the

@@ -29,7 +29,10 @@ def is_login(step):
 
 def _action(step, terminals):
     methods = step.get("methods", []) if isinstance(step, dict) else []
-    if (not methods or step.get("steps") or step.get("submit")
+    nested_actions = bool(step.get("steps") or step.get("submit")) if isinstance(step, dict) else False
+    if (not isinstance(methods, list) or not methods
+            or any(not isinstance(m, dict) for m in methods)
+            or nested_actions
             or step.get("graceful") or methods[-1].get("method") not in terminals
             or any(m.get("method") not in LOCATORS for m in methods[:-1])):
         raise ValueError("login requires locator chains with one explicit terminal action")
@@ -53,6 +56,16 @@ def login_options(step):
     success = options.get("success")
     if not isinstance(success, dict) or len(SUCCESS_KEYS & success.keys()) != 1:
         raise ValueError("login requires one explicit success locator")
+    locator_keys = SUCCESS_KEYS & success.keys()
+    locator_key = next(iter(locator_keys))
+    allowed = {"exact"} if locator_key != "selector" else set()
+    if locator_key == "role":
+        allowed |= {"name", "checked", "disabled", "expanded", "include_hidden",
+                    "level", "pressed", "selected"}
+    if success.keys() - {locator_key} - allowed:
+        raise ValueError("unsupported login success locator argument")
+    if not isinstance(success[locator_key], str) or not success[locator_key].strip():
+        raise ValueError("login success locator must be a non-empty string")
     for key, default in (("max_failures", 2), ("timeout_ms", 10000),
                          ("session_timeout_ms", 1000)):
         value = options.setdefault(key, default)
