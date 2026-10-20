@@ -46,6 +46,7 @@ from playwright.sync_api import sync_playwright
 from . import config, display, downloads
 from .db import Database, now
 from .interrupt import RunInterrupted
+from .login import is_login, login_options, settle_attempt, validate_login_recipe
 from .pagestate import PageState
 from .pause import pause_loop
 from .vault import (
@@ -495,13 +496,13 @@ def _record_step(ctx, state, step, parent_step=None):
     )
 
 
-def _execute_step(ctx, step, parent_step=None):
+def _execute_step(ctx, step, parent_step=None, single_attempt=False):
     """Execute one step (top-level or nested) with its attempt budget.
 
     Records exactly one PageStatus row for the step (its final outcome).
     Raises StepAbortError when a non-graceful step exhausts its attempts."""
     graceful = bool(step.get("graceful", False))
-    attempts = step_attempts(graceful)
+    attempts = 1 if single_attempt else step_attempts(graceful)
     step_number = step.get("step", 0)
 
     _debug_wait(ctx, step)
@@ -657,6 +658,54 @@ def _execute_step_with_pause(ctx, step):
             raise PauseOutcomeAbort(outcome) from e
 
 
+def _execute_login(ctx, step):
+    """One durable submission; resume verifies, never replays the action."""
+    options = login_options(step)
+    locator = _locator_for(ctx.page, options["success"])
+
+    def proven(timeout):
+        try:
+            locator.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        if not ctx.db.login_succeeded(ctx.task["id"], ctx.run_id):
+            raise StepAbortError("Another run owns the unresolved login attempt")
+        return True
+
+    if proven(options["session_timeout_ms"]):
+        return
+    for preparation in step.get("steps", []):
+        _execute_step(ctx, preparation, parent_step=step["step"], single_attempt=True)
+    if not ctx.db.reserve_login_attempt(ctx.task["id"], ctx.run_id,
+                                        options["max_failures"]):
+        from .notify import notify_login_locked
+        task = ctx.db.get_task(ctx.task["id"])
+        if task["login_locked"]:
+            notify_login_locked(ctx.db, task)
+        raise StepAbortError("Login attempt refused; check the task login block")
+    try:
+        _execute_step(ctx, step["submit"], parent_step=step["step"], single_attempt=True)
+        if proven(options["timeout_ms"]):
+            return
+    except RunInterrupted:
+        raise
+    except Exception as e:
+        # Never retry an uncertain submit, including a locator or DB error.
+        logger.warning("Login submission has no success proof (%s)", type(e).__name__)
+    if settle_attempt(ctx.db, ctx.task["id"], ctx.run_id):
+        raise StepAbortError("Login attempt limit reached; task blocked")
+    while True:
+        outcome = pause_loop(
+            ctx, "login_failed",
+            "Login not proven. Complete it manually, then resume to verify. "
+            "Resume never submits again. Manual submissions are not counted.",
+            None, "login_not_proven", step["step"])
+        if outcome != "resume":
+            raise PauseOutcomeAbort(outcome)
+        if proven(options["timeout_ms"]):
+            return
+
+
 def _handle_download_with_pause(ctx, step):
     """The expect_download handler under the C5 pause loop
     (reason=download_failed); a resume retries the download."""
@@ -732,6 +781,9 @@ def _run_recipe(ctx, recipe):
                 service_name = service.get("serviceName")
                 logger.info(f"Processing Service: {service_name} for {ctx.bcs.usr}.")
                 for step in sorted(service.get("steps", []), key=lambda x: x.get("step", 0)):
+                    if is_login(step):
+                        _execute_login(ctx, step)
+                        continue
                     wait_method = _wait_user_method(step)
                     if wait_method is not None:
                         # C5.5: a wait_user step pauses before execution and
@@ -782,10 +834,19 @@ def run_task(task_id: int, debug: bool = False) -> int:
             print(f"runner: task {task_id} not found", file=sys.stderr)
             return 1
 
+        if task["login_locked"] or task["login_pending_run_id"] is not None:
+            print("runner: task login is blocked or unresolved; no run started", file=sys.stderr)
+            return 1
+
         recipe_file = task["recipe_file"] or str(config.recipe_path_for(task["service"]))
         recipe = CheckRecipe(recipe_file, str(config.RECIPE_SCHEMA))
         if recipe is None:
             print(f"runner: recipe {recipe_file} not found or invalid", file=sys.stderr)
+            return 1
+        try:
+            validate_login_recipe(recipe)
+        except ValueError as e:
+            print(f"runner: invalid login contract: {e}", file=sys.stderr)
             return 1
 
         # C6: the runner owns the per-run display: claim a display from the
@@ -850,6 +911,7 @@ def run_task(task_id: int, debug: bool = False) -> int:
                 # the vault preflight or an unexpected error stopped the
                 # run before the step loop ran.
                 db.update_run(run_id, result=result, ended_at=now())
+                settle_attempt(db, task_id, run_id)
                 # A finished run releases the task: the 'waiting' status
                 # set by a pause is terminal here (resume, cancel and
                 # timeout all end the run), so the task goes back to idle

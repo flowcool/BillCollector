@@ -45,6 +45,8 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/step"
+      submit:
+        $ref: "#/definitions/step"
   method:
     type: object
     required:

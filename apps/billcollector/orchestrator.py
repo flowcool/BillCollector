@@ -82,6 +82,7 @@ from pathlib import Path
 
 from . import config, display
 from .db import Database, now
+from .login import settle_attempt
 
 logger = logging.getLogger("billcollector.orchestrator")
 
@@ -192,6 +193,7 @@ class Orchestrator:
             if run["pid"] is not None and _pid_alive(run["pid"]):
                 continue
             self._db.update_run(run["id"], result="interrupted", ended_at=now())
+            settle_attempt(self._db, run["task_id"], run["id"])
             if run["display"] is not None:
                 display.remove_display_lock(run["display"])
             self._db.set_task_status(run["task_id"], "idle")
@@ -229,6 +231,7 @@ class Orchestrator:
             row = self._db.get_run_for_pid(task_id, proc.pid)
             if row is not None and row["result"] is None:
                 self._db.update_run(row["id"], result="interrupted", ended_at=now())
+                settle_attempt(self._db, task_id, row["id"])
             self._db.set_task_status(task_id, "idle")
             logger.info("shutdown: runner for task %s terminated (pid %s)",
                         task_id, proc.pid)
@@ -445,6 +448,7 @@ class Orchestrator:
                            "".join(tail).strip() or "(none)")
             return
         run_id = row["id"]
+        settle_attempt(self._db, task_id, run_id)
         updates = {}
         if row["result"] is None:
             # The runner died before its own finalization (hard crash,
