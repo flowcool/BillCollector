@@ -12,14 +12,14 @@ LOCATORS = frozenset({
 SUCCESS_KEYS = frozenset({"role", "test_id", "placeholder", "label", "text", "selector"})
 
 
-def settle_attempt(db, task_id, run_id):
+def settle_attempt(db, task_id, run_id, *, dispatch=None):
     """Settle at most once and notify only on the transition to blocked."""
     from .notify import notify_login_locked
 
     settled = db.settle_login_attempt(task_id, run_id)
     task = db.get_task(task_id)
     if settled and task["login_locked"]:
-        notify_login_locked(db, task)
+        notify_login_locked(db, task, dispatch=dispatch)
     return bool(task["login_locked"])
 
 

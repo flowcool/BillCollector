@@ -1,5 +1,6 @@
 """Issue #20: isolated durable budget, entry guards and real loopback submits."""
 
+import asyncio
 import copy
 import fcntl
 import os
@@ -8,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -390,6 +392,72 @@ def test_notification_is_mocked_and_sent_once_per_block(db):
         assert settle_attempt(db, task, run)
     post.assert_called_once()
     assert "blocked after 1" in post.call_args.kwargs["data"].decode()
+
+
+@pytest.mark.parametrize("base", ["", "https://synthetic.invalid/ui/"])
+def test_login_notification_links_require_a_base_url(db, base):
+    task, run = task_run(db, 1)
+    db.set_setting("ntfy_topic", "synthetic-test-only")
+    db.set_setting("ui_base_url", base)
+    assert db.reserve_login_attempt(task, run, 1)
+    with mock.patch("billcollector.notify.requests.post",
+                    return_value=SimpleNamespace(status_code=200)) as post:
+        settle_attempt(db, task, run)
+    message = post.call_args.kwargs["data"].decode()
+    if base:
+        assert message.endswith(f"\n{base.rstrip('/')}/tasks/{task}")
+    else:
+        assert "\n" not in message
+        assert "/tasks/" not in message
+
+
+@pytest.mark.parametrize("path", ["finalize", "orphan", "terminal_orphan", "shutdown"])
+async def test_slow_login_notification_keeps_daemon_loop_responsive(db, path):
+    task, run = task_run(db, 1)
+    db.set_setting("ntfy_topic", "synthetic-test-only")
+    assert db.reserve_login_attempt(task, run, 1)
+    orch = Orchestrator(db)
+    finished = threading.Event()
+    worker_threads = []
+    loop_thread = threading.get_ident()
+
+    def slow_post(*args, **kwargs):
+        worker_threads.append(threading.get_ident())
+        time.sleep(0.3)
+        finished.set()
+        return SimpleNamespace(status_code=200)
+
+    heartbeat = asyncio.Event()
+    asyncio.get_running_loop().call_later(0.01, heartbeat.set)
+    shutdown = None
+    with mock.patch("billcollector.notify.requests.post", side_effect=slow_post) as post:
+        try:
+            if path == "finalize":
+                db.update_run(run, pid=12345)
+                orch._finalize_run(task, 12345, -9, [])
+            elif path == "shutdown":
+                db.update_run(run, pid=12345)
+                orch._processes[task] = SimpleNamespace(
+                    pid=12345, returncode=-9, wait=mock.AsyncMock(return_value=-9))
+                shutdown = asyncio.create_task(orch.shutdown())
+            else:
+                if path == "terminal_orphan":
+                    db.update_run(run, result="failure")
+                orch.cleanup_orphans()
+            await asyncio.wait_for(heartbeat.wait(), timeout=2)
+            assert not finished.is_set(), "HTTP transport blocked the event loop"
+            assert db.get_task(task)["login_locked"] == 1
+            assert db.get_task(task)["login_pending_run_id"] is None
+        finally:
+            if shutdown is not None:
+                await shutdown
+            else:
+                await orch.shutdown()
+        assert finished.is_set()
+        assert len(worker_threads) == 1
+        assert worker_threads[0] != loop_thread
+        post.assert_called_once()
+        assert not orch._notifications
 
 
 def test_submission_exception_never_replays_and_consumes_budget(browser_ctx):

@@ -20,6 +20,10 @@ phase submits once. A failed phase stops all later automatic phases. Resume
 only verifies final authentication. A visible intermediate success locator lets
 the runner skip an already completed phase. Use a marker unique to that state.
 A crash between phases consumes one transaction attempt.
+An intermediate marker must disappear after the portal leaves that state. A marker
+that stays visible on later pages can make the runner skip a required phase.
+After the first submission, preparation errors in later phases (including a TOTP
+vault fetch failure) consume the reserved attempt even without a later submission.
 
 ```yaml
 services:
@@ -73,7 +77,9 @@ failure, monitor finalization or orphan recovery. A crash without success proof
 consumes that budget. A crash before dispatch can conservatively consume it too.
 
 The limit cannot increase during a consecutive-failure cycle. A new lower limit
-can tighten it. Explicit clear preserves the profile and scheduler configuration,
+can tighten it. Raising the recipe limit after a block grants no extra attempts:
+the effective limit stays at the minimum of the stored and recipe limits until
+session proof. Explicit clear preserves the profile and scheduler configuration,
 and leaves only one attempt. Session proof resets the budget. Ordinary lifecycle
 status changes cannot clear a login block. Manual VNC/guided-browser submissions
 are outside the automatic counter and the UI states that limitation.
@@ -97,7 +103,9 @@ The implementation follows six steps:
 5. **Operator controls** (dashboard, task detail, notifications): show the block,
    refuse execution, confirm idle-only clear, preserve profile and schedule.
    Automatic locking sends one best-effort notification. Delivery is not durable
-   across a crash in the commit-to-send window.
+   across a crash in the commit-to-send window. The daemon sends HTTP in a worker
+   thread and awaits pending sends during shutdown without blocking its event loop.
+   The runner sends synchronously. An empty UI base URL omits the task link.
 6. **Acceptance**: execute isolated tests, browser fixtures and historical
    regression; inspect the semantic diff and pinned static checks; commit locally.
    Upstream publication requires the issue #20 agreement and a fresh baseline.
@@ -129,6 +137,8 @@ The implementation follows six steps:
 | UI clear preserves profile and schedule | `test_login_clear_grants_one_attempt_and_preserves_configuration` |
 | Clear is unavailable while active | `test_login_clear_is_unavailable_while_task_is_active` |
 | Notification transport is simulated and called once | `test_notification_is_mocked_and_sent_once_per_block` |
+| Slow notifications keep daemon lifecycle paths responsive | `test_slow_login_notification_keeps_daemon_loop_responsive` |
+| Notification links require a configured UI base URL | `test_login_notification_links_require_a_base_url` |
 | Real recipe dispatcher continues after proven login | `test_dispatcher_runs_login_and_continues_only_after_success` |
 
 The focused tests are in `tests/test_bc_login.py`. UI tests are in

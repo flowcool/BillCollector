@@ -135,6 +135,18 @@ class Orchestrator:
         # Registered log subscriber callables (D2.2): each runner stdout
         # line is pushed to them by the monitor (after the file write).
         self._log_subscribers = []
+        self._notifications = set()
+
+    def _dispatch_notification(self, send, *args):
+        """Send immutable payloads off-loop; retain jobs until shutdown."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return send(*args)
+        job = loop.create_task(asyncio.to_thread(send, *args))
+        self._notifications.add(job)
+        job.add_done_callback(self._notifications.discard)
+        return job
 
     @property
     def processes(self) -> dict:
@@ -193,7 +205,8 @@ class Orchestrator:
             if run["pid"] is not None and _pid_alive(run["pid"]):
                 continue
             self._db.update_run(run["id"], result="interrupted", ended_at=now())
-            settle_attempt(self._db, run["task_id"], run["id"])
+            settle_attempt(self._db, run["task_id"], run["id"],
+                           dispatch=self._dispatch_notification)
             if run["display"] is not None:
                 display.remove_display_lock(run["display"])
             self._db.release_task_run(run["task_id"])
@@ -212,7 +225,8 @@ class Orchestrator:
             run = self._db.get_run(pending)
             if run is not None and run["pid"] is not None and _pid_alive(run["pid"]):
                 continue
-            settle_attempt(self._db, task["id"], pending)
+            settle_attempt(self._db, task["id"], pending,
+                           dispatch=self._dispatch_notification)
             self._db.release_task_run(task["id"])
         return count
 
@@ -243,7 +257,8 @@ class Orchestrator:
             row = self._db.get_run_for_pid(task_id, proc.pid)
             if row is not None and row["result"] is None:
                 self._db.update_run(row["id"], result="interrupted", ended_at=now())
-                settle_attempt(self._db, task_id, row["id"])
+                settle_attempt(self._db, task_id, row["id"],
+                               dispatch=self._dispatch_notification)
             self._db.release_task_run(task_id)
             logger.info("shutdown: runner for task %s terminated (pid %s)",
                         task_id, proc.pid)
@@ -255,6 +270,8 @@ class Orchestrator:
             await monitor
         self._processes.clear()
         self._monitors.clear()
+        if self._notifications:
+            await asyncio.gather(*self._notifications)
 
     async def stop_run(self, task_id: int, timeout: float = STOP_TIMEOUT) -> bool:
         """Stop the task's live runner (D3.1): SIGTERM its process group,
@@ -460,7 +477,8 @@ class Orchestrator:
                            "".join(tail).strip() or "(none)")
             return
         run_id = row["id"]
-        settle_attempt(self._db, task_id, run_id)
+        settle_attempt(self._db, task_id, run_id,
+                       dispatch=self._dispatch_notification)
         updates = {}
         if row["result"] is None:
             # The runner died before its own finalization (hard crash,
