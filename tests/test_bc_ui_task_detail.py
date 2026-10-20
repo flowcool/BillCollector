@@ -339,3 +339,16 @@ async def test_downloads_page_lists_rows_with_the_duplicate_badge(
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+async def test_login_pending_is_distinct_from_blocked(user, testdb):
+    task = testdb.create_task("svc-login-pending", "user1")
+    run = testdb.create_run(task)
+    testdb.update_task(task, login_pending_run_id=run)
+    await _login(user, testdb)
+    await user.open(f"/tasks/{task}")
+    await user.should_see("Login: pending")
+    (run_btn,) = user.find(marker="detail-run").elements
+    (clear_btn,) = user.find(marker="detail-login-clear").elements
+    assert not run_btn.enabled
+    assert not clear_btn.enabled

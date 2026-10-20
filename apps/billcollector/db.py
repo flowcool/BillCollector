@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS Task (
     login_failures INTEGER NOT NULL DEFAULT 0,
     login_failure_limit INTEGER NOT NULL DEFAULT 2,
     login_locked INTEGER NOT NULL DEFAULT 0,
+    login_cycle_active INTEGER NOT NULL DEFAULT 0,
     login_pending_run_id INTEGER,
     created_at TEXT,
     updated_at TEXT,
@@ -121,10 +122,19 @@ class Database:
             "login_failures": "INTEGER NOT NULL DEFAULT 0",
             "login_failure_limit": "INTEGER NOT NULL DEFAULT 2",
             "login_locked": "INTEGER NOT NULL DEFAULT 0",
+            "login_cycle_active": "INTEGER NOT NULL DEFAULT 0",
             "login_pending_run_id": "INTEGER",
         }.items():
             if name not in cols:
                 self.conn.execute(f"ALTER TABLE Task ADD COLUMN {name} {definition}")
+
+        if "login_cycle_active" not in cols:
+            # Old candidates cannot distinguish a cleared limit-one task from
+            # success. Preserve its cap conservatively until fresh session proof.
+            self.conn.execute(
+                """UPDATE Task SET login_cycle_active=1
+                   WHERE login_failures>0 OR login_locked=1
+                     OR login_pending_run_id IS NOT NULL OR login_failure_limit=1""")
 
     # ---- Task -------------------------------------------------------------
     def create_task(self, service, user, recipe_file=None, enabled=False,
@@ -212,18 +222,18 @@ class Database:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError("login failure limit must be a positive integer")
         cur = self.conn.execute(
-            """UPDATE Task SET login_failures=login_failures+1,
-                   login_failure_limit=CASE WHEN login_failures>0
+            """UPDATE Task SET login_failures=login_failures+1, login_cycle_active=1,
+                   login_failure_limit=CASE WHEN login_failures>0 OR login_cycle_active=1
                      THEN MIN(login_failure_limit,?) ELSE ? END,
                    login_pending_run_id=?, updated_at=?
                WHERE id=? AND login_locked=0 AND login_pending_run_id IS NULL
-                   AND login_failures < CASE WHEN login_failures>0
+                   AND login_failures < CASE WHEN login_failures>0 OR login_cycle_active=1
                      THEN MIN(login_failure_limit,?) ELSE ? END""",
             (limit, limit, run_id, now(), task_id, limit, limit))
         reserved = cur.rowcount == 1
         if not reserved:
             self.conn.execute(
-                """UPDATE Task SET login_locked=1,
+                """UPDATE Task SET login_locked=1, login_cycle_active=1,
                        login_failure_limit=MIN(login_failure_limit,?), updated_at=?
                    WHERE id=? AND login_pending_run_id IS NULL
                      AND login_failures>=MIN(login_failure_limit,?)""",
@@ -245,7 +255,7 @@ class Database:
     def login_succeeded(self, task_id, run_id):
         """Only an explicit session proof resets the consecutive budget."""
         cur = self.conn.execute(
-            """UPDATE Task SET login_failures=0, login_locked=0,
+            """UPDATE Task SET login_failures=0, login_locked=0, login_cycle_active=0,
                    login_pending_run_id=NULL, updated_at=? WHERE id=?
                    AND login_locked=0
                    AND (login_pending_run_id IS NULL OR login_pending_run_id=?)
@@ -258,7 +268,7 @@ class Database:
     def clear_login_lock(self, task_id):
         """Grant one further attempt. Preserve profile and scheduling intent."""
         cur = self.conn.execute(
-            """UPDATE Task SET login_locked=0,
+            """UPDATE Task SET login_locked=0, login_cycle_active=1,
                    login_failures=MAX(0, login_failure_limit-1), updated_at=?
                WHERE id=? AND status='idle' AND login_locked=1
                    AND login_pending_run_id IS NULL""", (now(), task_id))

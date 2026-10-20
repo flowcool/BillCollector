@@ -594,3 +594,49 @@ def test_finalized_attempt_recovery_preserves_another_active_run(db):
     assert db.get_task(task)["login_pending_run_id"] is None
     assert db.get_task(task)["status"] == "running"
     assert db.get_run(active)["result"] is None
+
+
+def test_limit_one_clear_cannot_raise_budget_and_survives_restart(db):
+    task, run = task_run(db, 1)
+    assert db.reserve_login_attempt(task, run, 1)
+    assert settle_attempt(db, task, run)
+    assert db.clear_login_lock(task)
+    reopened = Database(db.path)
+    try:
+        retry = reopened.create_run(task)
+        assert reopened.reserve_login_attempt(task, retry, 2)
+        assert reopened.get_task(task)["login_failure_limit"] == 1
+        assert settle_attempt(reopened, task, retry)
+        assert not reopened.reserve_login_attempt(task, reopened.create_run(task), 2)
+        assert reopened.clear_login_lock(task)
+        success = reopened.create_run(task)
+        assert reopened.reserve_login_attempt(task, success, 2)
+        assert reopened.login_succeeded(task, success)
+        assert reopened.reserve_login_attempt(task, reopened.create_run(task), 2)
+        assert reopened.get_task(task)["login_failure_limit"] == 2
+    finally:
+        reopened.close()
+
+
+
+def test_migrate_prior_candidate_preserves_cleared_limit_one(tmp_path):
+    path = tmp_path / "prior-candidate.db"
+    prior_schema = "\n".join(line for line in SCHEMA.splitlines()
+                             if "login_cycle_active" not in line)
+    with sqlite3.connect(path) as conn:
+        conn.executescript(prior_schema)
+        conn.execute("""INSERT INTO Task(service,user,login_failure_limit)
+                        VALUES ('prior','synthetic',1)""")
+    for _ in range(2):
+        migrated = Database(path)
+        assert migrated.get_task(1)["login_cycle_active"] == 1
+        migrated.close()
+    migrated = Database(path)
+    migrated.set_setting("ntfy_topic", "")
+    try:
+        run = migrated.create_run(1)
+        assert migrated.reserve_login_attempt(1, run, 2)
+        assert migrated.get_task(1)["login_failure_limit"] == 1
+        assert settle_attempt(migrated, 1, run)
+    finally:
+        migrated.close()

@@ -62,8 +62,12 @@ runner is unchanged. Existing daemon recipes keep their existing behavior.
 
 ## Persistence and recovery
 
-The four additive Task fields are `login_failures`, `login_failure_limit`,
-`login_locked` and `login_pending_run_id`. Reservation increments and commits the
+The five additive Task fields are `login_failures`, `login_failure_limit`,
+`login_locked`, `login_pending_run_id` and `login_cycle_active`.
+The cycle marker survives a clear even when a limit of one leaves zero failures.
+Only session proof ends that cycle. Migration of an older candidate conservatively
+keeps a stored limit of one active until session proof, because its cleared and
+successful states were indistinguishable. Reservation increments and commits the
 budget before dispatch. A pending attempt is settled once on normal exit, runner
 failure, monitor finalization or orphan recovery. A crash without success proof
 consumes that budget. A crash before dispatch can conservatively consume it too.
@@ -118,6 +122,9 @@ The implementation follows six steps:
 | Lowering the limit preserves one-attempt clear | `test_lowered_limit_clear_grants_exactly_one_retry` |
 | Unsupported locator options fail before runtime | `test_unsupported_test_id_option_rejected_before_runtime` |
 | Finalized-attempt recovery preserves another active Run | `test_finalized_attempt_recovery_preserves_another_active_run` |
+| Limit-one clear survives restart and cannot raise the budget | `test_limit_one_clear_cannot_raise_budget_and_survives_restart` |
+| Prior candidate migration preserves a cleared limit-one budget | `test_migrate_prior_candidate_preserves_cleared_limit_one` |
+| Pending login is distinct from blocked in task detail | `test_login_pending_is_distinct_from_blocked` |
 | Limit increase cannot bypass clear | `test_limit_cannot_increase_to_bypass_clear_budget` |
 | UI clear preserves profile and schedule | `test_login_clear_grants_one_attempt_and_preserves_configuration` |
 | Clear is unavailable while active | `test_login_clear_is_unavailable_while_task_is_active` |

@@ -416,8 +416,10 @@ def register_task_detail(db: Database, orchestrator: Orchestrator) -> None:
             status_badge.props(
                 f"color={STATUS_COLORS.get(status, 'grey')}")
             blocked = bool(task["login_locked"] or task["login_pending_run_id"] is not None)
+            login_state = ("blocked" if task["login_locked"] else
+                           "pending" if task["login_pending_run_id"] is not None else "available")
             login_status.set_text(
-                f"Login: {'blocked' if blocked else 'available'} · "
+                f"Login: {login_state} · "
                 f"Unproven attempts: {task['login_failures']}/{task['login_failure_limit']}")
             run_btn.set_enabled(status not in ("running", "waiting") and not blocked)
             clear_login_btn.set_enabled(status == "idle" and bool(task["login_locked"]))
