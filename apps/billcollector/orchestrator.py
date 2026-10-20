@@ -213,6 +213,7 @@ class Orchestrator:
             if run is not None and run["pid"] is not None and _pid_alive(run["pid"]):
                 continue
             settle_attempt(self._db, task["id"], pending)
+            self._db.release_task_run(task["id"])
         return count
 
     async def shutdown(self) -> None:

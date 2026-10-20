@@ -2,6 +2,7 @@
 
 import copy
 import fcntl
+import os
 import socket
 import sqlite3
 import subprocess
@@ -444,10 +445,14 @@ def test_process_crash_after_reservation_recovers_without_replay(db):
 def test_crash_between_finalization_and_settlement_recovers(db):
     task, run = task_run(db)
     db.reserve_login_attempt(task, run, 1)
+    db.set_task_status(task, "running")
     db.update_run(run, result="failure")
     assert Orchestrator(db).cleanup_orphans() == 0
-    assert db.get_task(task)["login_pending_run_id"] is None
-    assert db.get_task(task)["login_locked"] == 1
+    recovered = db.get_task(task)
+    assert recovered["login_pending_run_id"] is None
+    assert recovered["login_locked"] == 1
+    assert recovered["status"] == "idle"
+    assert db.clear_login_lock(task)
 
 
 def phased_login_step():
@@ -546,3 +551,46 @@ def test_interruption_between_phases_keeps_one_durable_attempt(browser_ctx):
     assert task["login_pending_run_id"] == ctx.run_id
     settle_attempt(ctx.db, ctx.task["id"], ctx.run_id)
     assert ctx.db.get_task(ctx.task["id"])["login_pending_run_id"] is None
+
+
+def test_lowered_limit_clear_grants_exactly_one_retry(db):
+    task, run = task_run(db)
+    assert db.reserve_login_attempt(task, run, 2)
+    settle_attempt(db, task, run)
+    retry = db.create_run(task)
+    assert not db.reserve_login_attempt(task, retry, 1)
+    blocked = db.get_task(task)
+    assert blocked["login_locked"] == 1
+    assert blocked["login_failure_limit"] == 1
+    assert db.clear_login_lock(task)
+    assert db.reserve_login_attempt(task, retry, 1)
+    assert settle_attempt(db, task, retry)
+    assert not db.reserve_login_attempt(task, db.create_run(task), 1)
+
+
+def test_unsupported_test_id_option_rejected_before_runtime(db, monkeypatch):
+    step = login_step()
+    step["methods"][0]["arguments"][0] = {"success": {"test_id": "account", "exact": True}}
+    recipe = {"services": [{"serviceName": "mock", "steps": [step]}]}
+    assert not validate_recipe(yaml.safe_dump(recipe))[0]
+    task, _ = task_run(db)
+    monkeypatch.setattr(config, "DB_FILE", db.path)
+    with mock.patch.object(runner, "_install_signal_handlers"), \
+            mock.patch.object(runner, "CheckRecipe", return_value=recipe), \
+            mock.patch.object(runner, "_vault_preflight") as vault, \
+            mock.patch.object(runner.display, "allocate_display") as display:
+        assert runner.run_task(task) == 1
+    vault.assert_not_called()
+    display.assert_not_called()
+
+
+def test_finalized_attempt_recovery_preserves_another_active_run(db):
+    task, run = task_run(db)
+    assert db.reserve_login_attempt(task, run, 2)
+    db.set_task_status(task, "running")
+    db.update_run(run, result="failure")
+    active = db.create_run(task, pid=os.getpid())
+    assert Orchestrator(db).cleanup_orphans() == 0
+    assert db.get_task(task)["login_pending_run_id"] is None
+    assert db.get_task(task)["status"] == "running"
+    assert db.get_run(active)["result"] is None

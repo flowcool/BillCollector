@@ -115,6 +115,9 @@ The implementation follows six steps:
 | Concurrent reservation and direct entry are bounded | `test_concurrent_connections_can_reserve_only_one_attempt`, `test_concurrent_direct_entry_stops_before_task_execution` |
 | CLI and daemon admission refuse a blocked task | `test_blocked_direct_runner_stops_before_recipe_vault_or_display`, `test_blocked_manual_and_scheduled_admission_never_spawns` |
 | Foreign run cannot reset or release another run | `test_foreign_or_completed_run_cannot_reset_budget`, `test_rejected_contender_cannot_release_active_task` |
+| Lowering the limit preserves one-attempt clear | `test_lowered_limit_clear_grants_exactly_one_retry` |
+| Unsupported locator options fail before runtime | `test_unsupported_test_id_option_rejected_before_runtime` |
+| Finalized-attempt recovery preserves another active Run | `test_finalized_attempt_recovery_preserves_another_active_run` |
 | Limit increase cannot bypass clear | `test_limit_cannot_increase_to_bypass_clear_budget` |
 | UI clear preserves profile and schedule | `test_login_clear_grants_one_attempt_and_preserves_configuration` |
 | Clear is unavailable while active | `test_login_clear_is_unavailable_while_task_is_active` |

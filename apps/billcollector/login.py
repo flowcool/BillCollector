@@ -88,7 +88,7 @@ def validate_success(success):
         raise ValueError("login requires one explicit success locator")
     locator_keys = SUCCESS_KEYS & success.keys()
     locator_key = next(iter(locator_keys))
-    allowed = {"exact"} if locator_key != "selector" else set()
+    allowed = {"exact"} if locator_key not in {"selector", "test_id"} else set()
     if locator_key == "role":
         allowed |= {"name", "checked", "disabled", "expanded", "include_hidden",
                     "level", "pressed", "selected"}

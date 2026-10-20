@@ -223,10 +223,11 @@ class Database:
         reserved = cur.rowcount == 1
         if not reserved:
             self.conn.execute(
-                """UPDATE Task SET login_locked=1, updated_at=?
+                """UPDATE Task SET login_locked=1,
+                       login_failure_limit=MIN(login_failure_limit,?), updated_at=?
                    WHERE id=? AND login_pending_run_id IS NULL
                      AND login_failures>=MIN(login_failure_limit,?)""",
-                (now(), task_id, limit))
+                (limit, now(), task_id, limit))
         self.conn.commit()
         return reserved
 
