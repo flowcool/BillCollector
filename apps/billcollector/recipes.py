@@ -97,7 +97,8 @@ def _step_entry(step, depth: int = 0) -> dict:
         "methods": [_method_text(m) for m in step.get("methods") or []],
         "depth": depth,
         "children": [_step_entry(s, depth + 1) for s in step.get("steps") or []]
-                    + ([_step_entry(step["submit"], depth + 1)] if "submit" in step else []),
+                    + ([_step_entry(step["submit"], depth + 1)] if "submit" in step else [])
+                    + [_step_entry(phase, depth + 1) for phase in step.get("phases", [])],
     }
 
 

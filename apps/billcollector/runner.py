@@ -660,7 +660,7 @@ def _execute_step_with_pause(ctx, step):
 
 
 def _execute_login(ctx, step):
-    """One durable submission; resume verifies, never replays the action."""
+    """One durable transaction; each phase submits once, resume only verifies."""
     options = login_options(step)
     locator = _locator_for(ctx.page, options["success"])
 
@@ -675,23 +675,46 @@ def _execute_login(ctx, step):
 
     if proven(options["session_timeout_ms"]):
         return
-    for preparation in step.get("steps", []):
-        _execute_step(ctx, preparation, parent_step=step["step"], single_attempt=True)
-    if not ctx.db.reserve_login_attempt(ctx.task["id"], ctx.run_id,
-                                        options["max_failures"]):
-        from .notify import notify_login_locked
-        task = ctx.db.get_task(ctx.task["id"])
-        if task["login_locked"]:
-            notify_login_locked(ctx.db, task)
-        raise StepAbortError("Login attempt refused; check the task login block")
+    phases = options["phases"]
+    start = 0
+    # Find the latest completed phase before dispatching any credentials.
+    for index in range(len(phases) - 2, -1, -1):
+        try:
+            _locator_for(ctx.page, phases[index]["success"]).wait_for(
+                state="visible", timeout=options["session_timeout_ms"])
+            start = index + 1
+            break
+        except PlaywrightTimeoutError:
+            pass
+    reserved = False
     try:
-        _execute_step(ctx, step["submit"], parent_step=step["step"], single_attempt=True)
-        if proven(options["timeout_ms"]):
-            return
+        for index in range(start, len(phases)):
+            phase = phases[index]
+            final = index == len(phases) - 1
+            marker = _locator_for(ctx.page, phase["success"])
+            for preparation in phase.get("steps", []):
+                _execute_step(ctx, preparation, parent_step=step["step"], single_attempt=True)
+            if not reserved:
+                if not ctx.db.reserve_login_attempt(ctx.task["id"], ctx.run_id,
+                                                    options["max_failures"]):
+                    from .notify import notify_login_locked
+                    task = ctx.db.get_task(ctx.task["id"])
+                    if task["login_locked"]:
+                        notify_login_locked(ctx.db, task)
+                    raise StepAbortError("Login attempt refused; check the task login block")
+                reserved = True
+            _execute_step(ctx, phase["submit"], parent_step=step["step"], single_attempt=True)
+            if final:
+                if proven(options["timeout_ms"]):
+                    return
+            else:
+                marker.wait_for(state="visible", timeout=options["timeout_ms"])
     except RunInterrupted:
         raise
     except Exception as e:
-        # Never retry an uncertain submit, including a locator or DB error.
+        if not reserved:
+            raise  # Preparation failed before any submission was reserved.
+        # Never retry an uncertain phase, including a locator or DB error.
         logger.warning("Login submission has no success proof (%s)", type(e).__name__)
     if settle_attempt(ctx.db, ctx.task["id"], ctx.run_id):
         raise StepAbortError("Login attempt limit reached; task blocked")

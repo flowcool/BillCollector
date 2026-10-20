@@ -448,3 +448,101 @@ def test_crash_between_finalization_and_settlement_recovers(db):
     assert Orchestrator(db).cleanup_orphans() == 0
     assert db.get_task(task)["login_pending_run_id"] is None
     assert db.get_task(task)["login_locked"] == 1
+
+
+def phased_login_step():
+    step = login_step()
+    first = {"steps": step.pop("steps"), "submit": step.pop("submit"),
+             "success": {"selector": "#otp"}}
+    second = copy.deepcopy(first)
+    second["success"] = {"selector": "#account"}
+    second["steps"][0]["methods"][0]["arguments"] = [{"selector": "#otp"}]
+    second["steps"][0]["methods"][-1]["arguments"] = [{"value": "123456"}]
+    second["submit"]["methods"][0]["arguments"] = [{"selector": "#verify"}]
+    step["phases"] = [first, second]
+    return step
+
+
+@pytest.mark.parametrize("failure", [None, "password", "otp"])
+@pytest.mark.parametrize("start_at_otp", [False, True])
+def test_two_phase_browser_login_counts_one_transaction(browser_ctx, failure, start_at_otp):
+    ctx = browser_ctx
+    ctx.page.set_content("""
+        <input id="password"><button id="submit">Password</button>
+        <section id="second" hidden><input id="otp"><button id="verify">OTP</button></section>
+        <div id="account" hidden>Account</div>
+        <script>
+        window.counts = [0, 0];
+        document.querySelector('#submit').onclick = () => {
+            counts[0]++;
+            if (window.failure !== 'password') document.querySelector('#second').hidden = false;
+        };
+        document.querySelector('#verify').onclick = () => {
+            counts[1]++;
+            if (window.failure !== 'otp') document.querySelector('#account').hidden = false;
+        };
+        </script>
+    """)
+    ctx.page.evaluate("failure => window.failure = failure", failure)
+    if start_at_otp:
+        ctx.page.locator("#second").evaluate("element => element.hidden = false")
+    step = phased_login_step()
+    recipe = {"services": [{"serviceName": "mock", "steps": [step]}]}
+    validate_login_recipe(recipe)
+    assert validate_recipe(yaml.safe_dump(recipe))[0]
+    pauses = []
+
+    def resume(*_):
+        pauses.append(ctx.page.evaluate("counts.slice()"))
+        assert ctx.db.get_task(ctx.task["id"])["login_failures"] == 1
+        ctx.page.locator("#account").evaluate("element => element.hidden = false")
+        return "resume"
+
+    with mock.patch.object(runner, "pause_loop", side_effect=resume):
+        runner._execute_login(ctx, step)
+    expected = [int(not start_at_otp), int(start_at_otp or failure != "password")]
+    assert ctx.page.evaluate("counts") == expected
+    assert len(pauses) == int(failure == "otp" or (failure == "password" and not start_at_otp))
+    assert ctx.db.get_task(ctx.task["id"])["login_failures"] == 0
+
+
+@pytest.mark.parametrize("mutation", ["mixed", "empty", "final", "nested", "unknown"])
+def test_phased_contract_rejects_ambiguous_or_nested_actions(mutation):
+    step = phased_login_step()
+    if mutation == "mixed":
+        step["steps"] = []
+    elif mutation == "empty":
+        step["phases"] = []
+    elif mutation == "final":
+        step["phases"][-1]["success"] = {"selector": "#not-final"}
+    elif mutation == "nested":
+        step["phases"][0]["steps"][0]["phases"] = [{}]
+    else:
+        step["phases"][0]["graceful"] = True
+    with pytest.raises(ValueError):
+        login_options(step)
+
+
+def test_interruption_between_phases_keeps_one_durable_attempt(browser_ctx):
+    ctx = browser_ctx
+    step = phased_login_step()
+    # Successful first submit exposes OTP. Death during OTP preparation cannot
+    # refund the transaction or execute the second submit.
+    actions = []
+
+    def execute(_, action, **kwargs):
+        actions.append(action)
+        if len(actions) == 2:
+            ctx.page.set_content('<input id="otp">')
+        if len(actions) == 3:
+            raise RunInterrupted()
+
+    with mock.patch.object(runner, "_execute_step", side_effect=execute):
+        with pytest.raises(RunInterrupted):
+            runner._execute_login(ctx, step)
+    assert len(actions) == 3
+    task = ctx.db.get_task(ctx.task["id"])
+    assert task["login_failures"] == 1
+    assert task["login_pending_run_id"] == ctx.run_id
+    settle_attempt(ctx.db, ctx.task["id"], ctx.run_id)
+    assert ctx.db.get_task(ctx.task["id"])["login_pending_run_id"] is None

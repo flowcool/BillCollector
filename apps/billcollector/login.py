@@ -1,4 +1,4 @@
-"""Candidate single-submit recipe contract (upstream issue #20).
+"""Candidate phased login recipe contract (upstream issue #20).
 
 Validation is separate from execution so malformed opt-in recipes fail before
 vault or browser access. Ordinary recipes retain their existing behavior.
@@ -29,7 +29,7 @@ def is_login(step):
 
 def _action(step, terminals):
     methods = step.get("methods", []) if isinstance(step, dict) else []
-    nested_actions = bool(step.get("steps") or step.get("submit")) if isinstance(step, dict) else False
+    nested_actions = bool(step.get("steps") or step.get("submit") or step.get("phases")) if isinstance(step, dict) else False
     if (not isinstance(methods, list) or not methods
             or any(not isinstance(m, dict) for m in methods)
             or nested_actions
@@ -53,7 +53,37 @@ def login_options(step):
         options.update(arg)
     if options.keys() - {"success", "max_failures", "timeout_ms", "session_timeout_ms"}:
         raise ValueError("unknown login argument")
-    success = options.get("success")
+    validate_success(options.get("success"))
+    for key, default in (("max_failures", 2), ("timeout_ms", 10000),
+                         ("session_timeout_ms", 1000)):
+        value = options.setdefault(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"login {key} must be a positive integer")
+    phases = step.get("phases")
+    if phases is not None:
+        if not isinstance(phases, list) or not phases or "steps" in step or "submit" in step:
+            raise ValueError("login phases must be non-empty and cannot mix with steps/submit")
+        for phase in phases:
+            if not isinstance(phase, dict) or phase.keys() - {"steps", "submit", "success"}:
+                raise ValueError("login phase accepts only steps, submit and success")
+            validate_success(phase.get("success"))
+        if phases[-1]["success"] != options["success"]:
+            raise ValueError("last phase must prove the final login success locator")
+    else:
+        phases = [{"steps": step.get("steps", []), "submit": step.get("submit"),
+                   "success": options["success"]}]
+    for phase in phases:
+        preparations = phase.get("steps", [])
+        if not isinstance(preparations, list):
+            raise ValueError("login preparation must be a list")
+        for preparation in preparations:
+            _action(preparation, {"fill"})
+        _action(phase.get("submit"), {"click", "press"})
+    options["phases"] = phases
+    return options
+
+
+def validate_success(success):
     if not isinstance(success, dict) or len(SUCCESS_KEYS & success.keys()) != 1:
         raise ValueError("login requires one explicit success locator")
     locator_keys = SUCCESS_KEYS & success.keys()
@@ -66,15 +96,6 @@ def login_options(step):
         raise ValueError("unsupported login success locator argument")
     if not isinstance(success[locator_key], str) or not success[locator_key].strip():
         raise ValueError("login success locator must be a non-empty string")
-    for key, default in (("max_failures", 2), ("timeout_ms", 10000),
-                         ("session_timeout_ms", 1000)):
-        value = options.setdefault(key, default)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise ValueError(f"login {key} must be a positive integer")
-    for preparation in step.get("steps", []):
-        _action(preparation, {"fill"})
-    _action(step.get("submit"), {"click", "press"})
-    return options
 
 
 def validate_login_recipe(recipe):
@@ -89,7 +110,7 @@ def validate_login_recipe(recipe):
             login_options(step)
             count += 1
         else:
-            if "submit" in step:
+            if "submit" in step or "phases" in step:
                 raise ValueError("submit belongs to a login block")
             for child in step.get("steps", []):
                 visit(child, True)

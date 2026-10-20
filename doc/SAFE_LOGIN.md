@@ -1,4 +1,4 @@
-# Single-submit login protection
+# Phased login protection
 
 Candidate interface for [upstream issue #20](https://github.com/s-t-e-f-a-n/BillCollector/issues/20).
 This is a complete fork implementation candidate. Local proof and upstream
@@ -10,8 +10,16 @@ Stefan has not agreed the recipe or database interface.
 Navigate to the portal before the login block. An already visible success locator
 skips the whole block. Preparation supports locator chains ending in `fill` only.
 The submit chain ends in one `click` or `press(key="Enter")`. Do not use this
-contract for a portal that submits automatically when a field is filled, or for
-authentication that needs multiple submit actions.
+contract for a portal that submits automatically when a field is filled.
+For password then TOTP, use ordered `phases`. Each phase contains `steps`,
+`submit` and `success`. The last success must equal the login success locator.
+Do not combine `phases` with the single-phase shorthand below.
+
+One transaction reserves one budget entry before its first submission. Each
+phase submits once. A failed phase stops all later automatic phases. Resume
+only verifies final authentication. A visible intermediate success locator lets
+the runner skip an already completed phase. Use a marker unique to that state.
+A crash between phases consumes one transaction attempt.
 
 ```yaml
 services:
@@ -71,12 +79,12 @@ are outside the automatic counter and the UI states that limitation.
 The implementation follows six steps:
 
 1. **Recipe validation** (`login.py`, schema, recipe editor): one top-level login
-   transaction, explicit success locator, preparation fills, one final submission.
+   transaction, explicit success locator, preparation fills, one submission per phase.
    Reject nested/graceful login and unsupported options before vault/browser use.
 2. **Persistent budget** (`db.py`): additive migration, atomic reservation,
    run ownership, idempotent settlement and one-attempt clear. A threshold cannot
    increase during a failure cycle. A foreign or finalized run cannot reset it.
-3. **Execution** (`runner.py`): persistent-session bypass, one submission,
+3. **Execution** (`runner.py`): persistent-session bypass, ordered phase submissions,
    pause/resume proof without replay, and a process-held task lock for CLI and
    daemon entry. Keep unrelated retries and graceful/download behavior.
 4. **Recovery** (`orchestrator.py`): settle pending attempts after crash and
@@ -95,7 +103,9 @@ The implementation follows six steps:
 | Requirement | Evidence in repository |
 |---|---|
 | Session proof bypasses login and resets budget | `test_real_browser_existing_session_skips_and_resets` |
-| One submit, failed resume never replays | `test_real_browser_failure_pause_resume_never_resubmits` |
+| One submit per phase, failed resume never replays | `test_real_browser_failure_pause_resume_never_resubmits` |
+| Password/TOTP success, failures and direct OTP entry | `test_two_phase_browser_login_counts_one_transaction` |
+| Crash between password and TOTP consumes one attempt | `test_interruption_between_phases_keeps_one_durable_attempt` |
 | Two failures block; clear grants only one attempt | `test_real_browser_threshold_blocks_and_clear_grants_one_attempt` |
 | Ambiguous submit consumes budget | `test_submission_exception_never_replays_and_consumes_budget` |
 | Preparation failure consumes no attempt | `test_prepare_failure_never_consumes_attempt` |
@@ -119,11 +129,11 @@ Python connections. The real browser fixture also blocks non-loopback requests.
 
 ## Boundaries and rollback
 
-This supports a single final submit action and requires a reliable, portal-specific
+This supports explicit ordered phases and requires a reliable, portal-specific
 success locator. Preparation fills must not trigger implicit submission. A stale
 or incorrect success locator cannot establish real authentication: recipe authors
 must verify that proof. Arbitrary manual VNC/browser submissions are not counted.
-Multi-stage flows with several submits require an agreed extension. The UI
+The candidate phased contract still requires upstream agreement. The UI
 notification is best-effort, and a stopped older binary does not enforce the new
 block fields. These are explicit contract limits, not claims of provider lockout
 immunity.
