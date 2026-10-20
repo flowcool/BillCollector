@@ -124,7 +124,7 @@ def parse_steps(data) -> list:
 # and replaces the whole chain (decision 7).
 _CHAIN_END_METHODS = frozenset({
     "click", "fill", "press", "goto", "close",
-    "expect_download", "wait_user",
+    "expect_download", "wait_user", "click_until_absent", "download_all",
 })
 
 
