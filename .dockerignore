@@ -16,3 +16,4 @@
 **/__pycache__
 apps/browser
 apps/db
+/apps/data/

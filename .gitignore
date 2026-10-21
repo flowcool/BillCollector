@@ -13,3 +13,4 @@ browser/
 db/
 .bc.lock
 openwiki/.run.json
+/apps/data/

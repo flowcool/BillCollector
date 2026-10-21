@@ -8,7 +8,8 @@ The Playwright assurance workflow runs on pull requests, maintained-branch pushe
 release tags, manual dispatch and a weekly schedule. It checks unit tests, a
 synthetic Chromium page, dependency consistency, undefined Python names, known
 runtime dependency vulnerabilities, CodeQL for Python and Actions, and the built
-container. GitHub schedules use UTC and execute the default branch's workflow.
+container. The daemon pytest suite uses repository-local Chromium binaries.
+The mock regression initializes its private legacy SQLite tables before running. GitHub schedules use UTC and execute the default branch's workflow.
 
 Bandit records medium and high findings and rejects high-severity findings.
 CodeQL and Trivy findings are available in GitHub code scanning. CodeQL excludes
