@@ -61,6 +61,9 @@ COPY --chown=${APP_UID}:${APP_GID} apps/. .
 # non-root app user
 RUN mkdir -p /apps/Downloads "$HOME" && chown -R ${APP_UID}:${APP_GID} /apps "$HOME"
 
+# Keep the schema available when recipes are mounted as mutable configuration.
+COPY apps/recipes_playwright/recipe-pw-schema.yaml /opt/billcollector/recipe-pw-schema.yaml
+
 # Run as the non-root app user (numeric, no user account needed)
 USER ${APP_UID}:${APP_GID}
 
@@ -69,3 +72,7 @@ VOLUME ["/apps/Downloads"]
 
 # Entry point
 CMD ["/bin/bash"]
+
+# Revision metadata follows dependency installation to preserve build caches.
+ARG REVISION=unknown
+LABEL org.opencontainers.image.revision="${REVISION}"
