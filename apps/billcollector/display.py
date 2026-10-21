@@ -78,6 +78,7 @@ def allocate_display(db=None):
     ``(display_number, websockify_port)``. Raises DisplayError when no
     display in the range is free (stale locks of crashed runs are freed
     by the orchestrator's startup cleanup, C7.4)."""
+    config.validate_runtime(lambda key: _setting(db, key))
     start, count = display_range(db)
     for n in range(start, start + count):
         lock = lock_path_for(n)
@@ -249,8 +250,7 @@ def start_display_stack(display, rfb_auth_file=None, websockify_port=None,
             vnc_args += ["-nopw"]
         children.append(_spawn(bins["x11vnc"], *vnc_args, env=env))
 
-        listen = (str(websockify_port) if rfb_auth_file is not None
-                  else f"127.0.0.1:{websockify_port}")
+        listen = config.novnc_listen_address(websockify_port, rfb_auth_file is not None)
         ws_args = [listen, f"127.0.0.1:{VNC_BASE_PORT + display}"]
         if NOVNC_WEB_DIR.is_dir():
             ws_args = ["--web", str(NOVNC_WEB_DIR), *ws_args]

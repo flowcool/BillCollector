@@ -169,6 +169,16 @@ Python dependencies are validated during the image build. The final container
 does not include `pip` or `wheel`; update `apps/requirements.txt` and rebuild the
 image when changing dependencies. Local virtual environments keep their installers.
 
+### Playwright daemon with Docker Compose
+
+Use the [complete daemon installation guide](doc/container-daemon.md) and
+[Compose example](compose/daemon.compose.yaml) for a persistent non-root daemon,
+zero-task startup, an existing Bitwarden sidecar and optional protected HTTPS
+browser access. The guide documents image access/pins, environment priority,
+UID/GID, backup and rollback. Build this checkout until a published release
+explicitly includes this contract. The earlier Docker/cron steps describe the
+batch installation; the Selenium production image is a separate package.
+
 ### Web UI
 
 Besides the cron-driven batch run, BillCollector ships as a self-hosted daemon with a web UI for scheduling, running, and supervising tasks. From the `apps` directory run:
@@ -177,9 +187,17 @@ Besides the cron-driven batch run, BillCollector ships as a self-hosted daemon w
 python3 -m billcollector serve
 ```
 
-The daemon binds to `127.0.0.1:8000` by default (`--host`/`--port`, or `BC_UI_HOST`, override both). The first start shows a set-password form (or seeds the password from `BC_UI_PASSWORD` in `apps/.env`); afterwards you sign in with that password.
+The daemon binds to `127.0.0.1:8000` by default. `BC_UI_HOST` and `BC_UI_PORT`
+set its environment defaults; explicit `--host`/`--port` win. The first start
+shows a set-password form (or seeds the password from optional `BC_UI_PASSWORD`
+in `apps/.env`); afterwards you sign in with that password.
 
-On the first start (while the task list is still empty), the `[Playwright]` sections of `bc_default.ini` and `bc_test.ini` are imported as tasks - each (service, user) pair becomes one task, initially **disabled**, with a default monthly cron. You enable a task and set its cron schedule per task from the UI; the Task table in the database is the source of truth, and the daemon rebuilds its scheduler jobs from it on every start (a missed run coalesces into a single catch-up run).
+On first start, the `[Playwright]` sections of `bc_default.ini` and `bc_test.ini`
+are imported once while the task list is empty. Set `BC_IMPORT_INI=false` to skip
+this import on every daemon start. Each imported (service, user) pair becomes
+one task, initially **disabled**, with a default monthly cron. Enable and schedule
+tasks in the UI. The Task table remains authoritative; the daemon rebuilds jobs
+on startup and coalesces missed runs into one catch-up run.
 
 The UI:
 
@@ -348,17 +366,23 @@ From the repository root, on a machine with Docker and BuildKit:
 python3 tests/check_docker_context.py
 ```
 
-Expected output: `Docker context: 19 private canaries excluded, 5 source files retained`. Useful options: `--dockerignore <path>` to check a different `.dockerignore` (e.g., a previous version as a negative control). Run this check whenever you change the `.dockerignore`, the `Dockerfile` or add new runtime artifacts.
+Expected output: `Docker context: 21 private canaries excluded, 5 source files retained`. Useful options: `--dockerignore <path>` to check a different `.dockerignore` (e.g., a previous version as a negative control). Run this check whenever you change the `.dockerignore`, the `Dockerfile` or add new runtime artifacts.
 
 ## Docker Layer Cache Reuse
 
-The `Dockerfile` orders the expensive, rarely-changing steps (python3/pip `apt` install, `pip3 install -r requirements.txt`, `playwright install --with-deps chromium ffmpeg`, the fonts `apt` install) **before** the application code is copied, and the build is deliberately given no build arg whose value changes on every deploy — a Dockerfile `ARG` value is part of the BuildKit cache key of every `RUN` step, so a per-commit value (like a git revision) would force a full rebuild on every deploy. The result:
+The `Dockerfile` installs Python dependencies, Chromium/FFmpeg and display/font
+packages **before** copying application code. Per-commit `REVISION` metadata is
+added after those layers. Keep changing revision values out of the dependency
+installation steps. The result:
 
 - Rebuilding the same tree (re-running `install_docker-image.sh` or `deploy_remote.sh` without a new commit) is an all-`CACHED` build.
 - A code-only change under `apps/` re-runs only the final `COPY` and `chown` steps.
 - A `requirements.txt` change re-runs `pip3 install` and the steps after it, but not the python3 `apt` step or the base image.
 
-The deployed commit is recorded in the deploy log (`deploy_remote.sh` prints `git log -1`) rather than as an image label.
+The image records `org.opencontainers.image.revision` when the build supplies
+`REVISION`; CI supplies the full source SHA. This argument and label follow
+dependency installation to retain its cache. Local fork builds should also set
+`SOURCE`. See [image verification](doc/container-daemon.md#select-an-image).
 
 ## Development & Deployment
 

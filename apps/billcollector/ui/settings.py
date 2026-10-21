@@ -29,6 +29,7 @@ FIELDS = (
     ("max_concurrency", "Max concurrency", "int",
      "Takes effect on the next daemon start."),
     ("display_start", "Display start", "int", ""),
+    ("display_count", "Display count", "int", "Use 1 with a fixed noVNC proxy route."),
     ("download_dir", "Download directory", "text", ""),
     ("ui_base_url", "UI base URL", "text", ""),
     ("vnc_password", "VNC password", "password", ""),
@@ -131,7 +132,11 @@ def register_settings(db: Database) -> None:
                                 ui.notify(
                                     f"{key}: invalid value", type="negative")
                                 return
-                            db.set_setting(key, stored)
+                            try:
+                                db.set_setting(key, stored)
+                            except ValueError as exc:
+                                ui.notify(str(exc), type="negative")
+                                return
                             ui.notify(f"{key} saved", type="positive")
 
                         btn.on("click", on_save)

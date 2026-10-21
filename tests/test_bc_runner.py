@@ -612,7 +612,7 @@ class DisplayLifecycleTests(unittest.TestCase):
         self.assertEqual(run["pid"], os.getpid())
         self.assertEqual(run["display"], 99)
         self.assertEqual(run["novnc_port"], 6080)
-        start.assert_called_once_with(99, rfb_auth_file=None)
+        start.assert_called_once_with(99, rfb_auth_file=None, websockify_port=6080)
 
     def test_browser_launch_points_display_at_the_allocated_display(self):
         manager = _LaunchDisplayManager()
@@ -641,11 +641,13 @@ class DisplayLifecycleTests(unittest.TestCase):
         run = self.db.get_run(1)
         self.assertEqual(run["display"], 130)
         self.assertEqual(run["novnc_port"], 6080)
-        start.assert_called_once_with(130, rfb_auth_file=None)
+        start.assert_called_once_with(130, rfb_auth_file=None, websockify_port=6080)
         self.assertEqual(manager.display_at_launch, ":130")
 
     def test_run_task_fails_without_creating_a_run_when_no_display_is_free(self):
-        self.db.set_setting("display_count", "0")
+        self.db.set_setting("display_count", "1")
+        # Exhaust a valid display range instead of using invalid configuration.
+        display.allocate_display(self.db)
         with mock.patch.object(display, "start_display_stack") as start:
             exit_code = self._run_task()
         self.assertEqual(exit_code, 1)
@@ -675,7 +677,7 @@ class DisplayLifecycleTests(unittest.TestCase):
         path = write.call_args[0][0]
         self.assertEqual(path, config.RUN_DIR / "1" / "vnc.rfbauth")
         self.assertEqual(write.call_args[0][1], "secret")
-        start.assert_called_once_with(99, rfb_auth_file=path)
+        start.assert_called_once_with(99, rfb_auth_file=path, websockify_port=6080)
 
     def test_run_task_defaults_to_no_vnc_auth(self):
         with mock.patch.object(display, "write_rfb_auth") as write, \
@@ -683,7 +685,7 @@ class DisplayLifecycleTests(unittest.TestCase):
                                   return_value=[]) as start:
             self._run_task()
         write.assert_not_called()
-        start.assert_called_once_with(99, rfb_auth_file=None)
+        start.assert_called_once_with(99, rfb_auth_file=None, websockify_port=6080)
 
 
 class _UntilLocator:

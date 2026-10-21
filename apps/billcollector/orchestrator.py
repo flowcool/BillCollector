@@ -117,6 +117,7 @@ class Orchestrator:
     """Spawns one runner subprocess per run and monitors it to completion."""
 
     def __init__(self, db: Database, runner_cmd=None, env=None):
+        config.validate_runtime(db.get_setting)
         self._db = db
         # The runner command: the real daemon uses the current interpreter
         # with the billcollector package (tests inject a stub runner).

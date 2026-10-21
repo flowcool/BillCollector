@@ -63,6 +63,9 @@ class DatabaseManager:
     def __init__(self, db_name):
         """Initialize the central tracking system."""
         self.db_name = db_name
+        # Create storage only when a batch database is opened, not on helper import.
+        # The daemon imports this engine with its own configured database adapter.
+        os.makedirs(os.path.dirname(os.path.abspath(db_name)), exist_ok=True)
         self.conn = sqlite3.connect(self.db_name)
         self.cursor = self.conn.cursor()
 

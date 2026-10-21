@@ -29,7 +29,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="bind host (default: $BC_UI_HOST if set, else 127.0.0.1)",
     )
     p_serve.add_argument(
-        "--port", type=int, default=8000, help="bind port (default: 8000)")
+        "--port", type=_port, default=config.env("BC_UI_PORT", "8000"),
+        help="bind port (default: $BC_UI_PORT if set, else 8000)")
 
     p_run = sub.add_parser("run", help="execute one task run")
     p_run.add_argument("task_id", type=int, help="Task id to run")
@@ -38,19 +39,31 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _port(value):
+    try:
+        port = int(value)
+        if 1 <= port <= 65535:
+            return port
+    except (TypeError, ValueError):
+        pass
+    raise argparse.ArgumentTypeError("port must be an integer from 1 to 65535")
+
+
 def main(argv=None) -> int:
     """CLI entry point; returns the process exit code."""
     config.load_env()
-    config.ensure_dirs()
-    database = Database()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     args = _build_parser().parse_args(argv)
+    config.validate_environment()
+    config.ensure_dirs()
+    database = Database()
 
     if args.command == "serve":
-        created = database.import_ini(config.INI_FILES)
+        config.validate_runtime(database.get_setting)
+        created = database.import_ini(config.INI_FILES) if config.import_ini_enabled() else 0
         # Seed the UI password hash from BC_UI_PASSWORD on first start
         # (before any request is served; never overwrites an existing hash).
         from .ui import auth as ui_auth
@@ -62,6 +75,7 @@ def main(argv=None) -> int:
         # Lazy import: NiceGUI is only needed when actually serving.
         from .ui import app as ui_app
 
+        database.close()
         ui_app.start(args.host, args.port)
         return 0
 
@@ -69,6 +83,7 @@ def main(argv=None) -> int:
         # Lazy import: Playwright is only needed when actually running a task.
         from . import runner
 
+        database.close()
         return runner.run_task(args.task_id, args.debug)
 
     return 2  # unreachable: subcommand dispatch is exhaustive

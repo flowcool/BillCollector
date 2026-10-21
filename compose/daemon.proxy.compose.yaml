@@ -1,0 +1,15 @@
+# An authenticated proxy on this private network must protect both backends.
+# This file publishes no browser port on the host and provisions no proxy.
+services:
+  billcollector:
+    environment:
+      BC_NOVNC_PATH: /browser
+      BC_NOVNC_HOST: 0.0.0.0
+    networks:
+      default: {}
+      proxy: {}
+
+networks:
+  proxy:
+    external: true
+    name: ${BC_PROXY_NETWORK:?Set BC_PROXY_NETWORK to the existing private proxy network}

@@ -6,22 +6,40 @@ at runtime. Paths can be redirected with ``BC_*`` environment variables, which
 keeps the test suite from touching the production ``apps/`` data.
 """
 
+import ipaddress
 import os
+import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # The package lives at apps/billcollector/, so the app root is the parent dir.
 APP_DIR = Path(__file__).resolve().parent.parent
+
+
+class ConfigurationError(ValueError):
+    """Invalid operator configuration; messages never contain secret values."""
+
+
+def load_env() -> None:
+    """Load the application .env before resolving paths; exports take priority."""
+    from dotenv import load_dotenv
+
+    env_file = APP_DIR / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
+
+
+load_env()
 
 
 def _path(name: str, default: Path) -> Path:
     return Path(os.environ.get(name, str(default)))
 
 
-# Data layout. Everything the daemon writes at runtime lives under data/
-# (logs, display locks, run artifacts) so a single volume mount covers it.
+# Keep legacy paths. Containers group state by explicitly setting these inputs.
 DATA_DIR = _path("BC_DATA_DIR", APP_DIR / "data")
 DB_DIR = _path("BC_DB_DIR", APP_DIR / "db")
-DB_FILE = _path("BC_DB_FILE", APP_DIR / "db" / "bc.db")
+DB_FILE = _path("BC_DB_FILE", DB_DIR / "bc.db")
 LOG_DIR = _path("BC_LOG_DIR", DATA_DIR / "logs")
 DISPLAY_DIR = DATA_DIR / "displays"
 RUN_DIR = DATA_DIR / "runs"
@@ -32,8 +50,12 @@ PROFILE_ROOT = _path("BC_PROFILE_ROOT", BROWSER_DIR / "profiles")
 DOWNLOAD_DIR = _path("BC_DOWNLOAD_DIR", APP_DIR / "Downloads")
 
 # Recipes stay as git-versioned YAML on disk (decision 7).
-RECIPE_DIR = APP_DIR / "recipes_playwright"
-RECIPE_SCHEMA = RECIPE_DIR / "recipe-pw-schema.yaml"
+RECIPE_DIR = _path("BC_RECIPE_DIR", APP_DIR / "recipes_playwright")
+# The image keeps its trusted schema outside operator-writable recipe mounts.
+# Host installs retain the versioned source schema, also when BC_RECIPE_DIR moves.
+_IMAGE_SCHEMA = Path("/opt/billcollector/recipe-pw-schema.yaml")
+RECIPE_SCHEMA = (_IMAGE_SCHEMA if _IMAGE_SCHEMA.is_file()
+                 else APP_DIR / "recipes_playwright" / "recipe-pw-schema.yaml")
 RECIPE_PREFIX = "recipe-pw__"
 
 # INI files imported into Tasks on first daemon start (decision 7 / M1 item 2).
@@ -46,11 +68,11 @@ os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(BROWSER_DIR))
 # Values are strings to match the TEXT Settings table; parse at the call site.
 DEFAULT_SETTINGS = {
     "pause_deadline_seconds": "1800",    # 30 min hold before a pause aborts
-    "max_concurrency": "1",              # global runner semaphore
+    "max_concurrency": os.environ.get("BC_MAX_CONCURRENCY", "1"),
     "display_start": "99",               # first Xvfb display (:99)
-    "display_count": "16",               # how many displays to scan when allocating
+    "display_count": os.environ.get("BC_DISPLAY_COUNT", "16"),
     "git_commit_enabled": "false",       # auto-commit recipe edits made in the UI
-    "ui_base_url": "http://127.0.0.1:8000",
+    "ui_base_url": os.environ.get("BC_UI_BASE_URL", "http://127.0.0.1:8000"),
     "ntfy_topic": "billcollector",       # ntfy push topic for pause deep links
     "download_dir": str(DOWNLOAD_DIR),
     "vnc_password": "",                  # empty: noVNC is localhost-only, no auth
@@ -59,17 +81,86 @@ DEFAULT_SETTINGS = {
 
 def ensure_dirs() -> None:
     """Create the runtime directories the daemon writes to."""
-    for d in (DATA_DIR, DB_DIR, LOG_DIR, DISPLAY_DIR, RUN_DIR, DOWNLOAD_DIR, PROFILE_ROOT):
-        d.mkdir(parents=True, exist_ok=True)
+    for d in (DATA_DIR, DB_DIR, DB_FILE.parent, LOG_DIR, DISPLAY_DIR, RUN_DIR,
+              DOWNLOAD_DIR, PROFILE_ROOT, RECIPE_DIR):
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            if not os.access(d, os.W_OK | os.X_OK):
+                raise PermissionError
+        except OSError:
+            raise ConfigurationError(f"Runtime directory is not writable: {d}") from None
 
 
-def load_env() -> None:
-    """Load apps/.env into os.environ (without clobbering exported values)."""
-    from dotenv import load_dotenv
+def import_ini_enabled() -> bool:
+    value = os.environ.get("BC_IMPORT_INI", "true").strip().lower()
+    if value not in ("true", "false"):
+        raise ConfigurationError("BC_IMPORT_INI must be true or false")
+    return value == "true"
 
-    env_file = APP_DIR / ".env"
-    if env_file.exists():
-        load_dotenv(env_file, override=False)
+
+def novnc_path() -> str:
+    raw = os.environ.get("BC_NOVNC_PATH", "")
+    prefix = raw.rstrip("/")
+    if raw and not re.fullmatch(r"/[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*", prefix):
+        raise ConfigurationError("BC_NOVNC_PATH must be an absolute URL path prefix")
+    return prefix
+
+
+def novnc_listen_address(port: int, has_password: bool) -> str:
+    host = os.environ.get("BC_NOVNC_HOST")
+    if host is None:
+        return str(port) if has_password else f"127.0.0.1:{port}"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        raise ConfigurationError("BC_NOVNC_HOST must be an IP address") from None
+    if not address.is_loopback and not has_password and not novnc_path():
+        raise ConfigurationError("Non-loopback BC_NOVNC_HOST requires BC_NOVNC_PATH or a VNC password")
+    return f"[{address}]:{port}" if address.version == 6 else f"{address}:{port}"
+
+
+def validate_setting(key: str, value) -> None:
+    if key in ("max_concurrency", "display_count", "display_start"):
+        try:
+            if int(value) > 0:
+                return
+        except (TypeError, ValueError):
+            pass
+        raise ConfigurationError(f"{key} must be a positive integer")
+    if key == "ui_base_url":
+        if value == "":
+            return  # existing notification contract: relative deep links
+        try:
+            url = urlsplit(str(value))
+            if (url.scheme in ("http", "https") and url.hostname
+                    and not url.username and not url.password and not url.fragment):
+                _ = url.port
+                return
+        except ValueError:
+            pass
+        raise ConfigurationError("ui_base_url must be an absolute HTTP(S) URL without credentials or fragment")
+
+
+def validate_runtime(get_setting) -> None:
+    """Validate effective settings before tasks start, including stored values."""
+    for key in ("max_concurrency", "display_count", "display_start", "ui_base_url"):
+        validate_setting(key, get_setting(key))
+    if novnc_path():
+        for key in ("max_concurrency", "display_count"):
+            if int(get_setting(key)) != 1:
+                raise ConfigurationError(f"BC_NOVNC_PATH requires effective {key}=1")
+    novnc_listen_address(6080, bool(str(get_setting("vnc_password") or "").strip()))
+
+
+def validate_environment() -> None:
+    for name in ("BC_DATA_DIR", "BC_DB_DIR", "BC_DB_FILE", "BC_LOG_DIR",
+                 "BC_BROWSER_DIR", "BC_PROFILE_ROOT", "BC_DOWNLOAD_DIR", "BC_RECIPE_DIR"):
+        if name in os.environ and not os.environ[name].strip():
+            raise ConfigurationError(f"{name} must be a non-empty path")
+    import_ini_enabled()
+    novnc_path()
+    for key in ("max_concurrency", "display_count", "ui_base_url"):
+        validate_setting(key, DEFAULT_SETTINGS[key])
 
 
 def env(name: str, default=None):

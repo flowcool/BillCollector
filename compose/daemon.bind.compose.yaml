@@ -1,0 +1,15 @@
+# Provision and verify these private directories before starting.
+# The same targets replace the primary example's named-volume mounts.
+services:
+  billcollector:
+    volumes:
+      - type: bind
+        source: ${BC_STATE_PATH:?Set BC_STATE_PATH to a pre-owned absolute directory}
+        target: /apps/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BC_RECIPES_PATH:?Set BC_RECIPES_PATH to a pre-owned absolute directory}
+        target: /apps/recipes
+        bind:
+          create_host_path: false

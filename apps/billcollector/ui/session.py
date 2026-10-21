@@ -57,12 +57,12 @@ import asyncio
 import base64
 import json
 import os
-import re
 
 from fastapi import Request
 from nicegui import ui
 
 from ..control import ControlClient, ControlError
+from .. import config
 from ..db import Database
 from .auth import require_auth
 from .format import deadline_text
@@ -131,11 +131,9 @@ def novnc_src_script() -> str:
     The proxy must strip this prefix and forward HTTP and WebSocket requests
     to one display. Configure display_count=1 when using a fixed backend port.
     """
-    prefix = os.environ.get("BC_NOVNC_PATH", "").rstrip("/")
+    prefix = config.novnc_path()
     if not prefix:
         return NOVNC_SRC_SCRIPT
-    if not re.fullmatch(r"/[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*", prefix):
-        raise ValueError("BC_NOVNC_PATH must be an absolute URL path prefix")
     direct = ("'http://' + window.location.hostname + ':' + port +\n"
               "        '/vnc.html?autoconnect=true'")
     proxied = ("window.location.origin + " + json.dumps(prefix) +

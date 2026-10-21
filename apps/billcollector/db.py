@@ -331,6 +331,9 @@ class Database:
         return config.DEFAULT_SETTINGS.get(key)
 
     def set_setting(self, key, value):
+        config.validate_setting(key, value)
+        if key in ("display_count", "max_concurrency", "vnc_password"):
+            config.validate_runtime(lambda name: value if name == key else self.get_setting(name))
         self.conn.execute(
             "INSERT OR REPLACE INTO Settings (key, value) VALUES (?, ?)", (key, str(value)))
         self.conn.commit()

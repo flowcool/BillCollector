@@ -29,11 +29,10 @@ RECIPES_PLAYWRIGHT_CODE_DIR = os.path.join(RECIPES_PLAYWRIGHT_DIR, ".code")     
 CHROMIUM_PLAYWRIGHT_DIR = os.path.join(APP_DIR, "browser")                                  # Directory for Chromium Playwright
 CHROMIUM_PLAYWRIGHT_PROFILE = os.path.join(CHROMIUM_PLAYWRIGHT_DIR, "profile")              # Directory for Chromium Playwright profile
 
-os.environ["PLAYWRIGHT_BROWSERS_PATH"] = CHROMIUM_PLAYWRIGHT_DIR                            # Set environment variable for Playwright browsers path
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", CHROMIUM_PLAYWRIGHT_DIR)                 # Preserve an explicit browser installation path
 
 DB_DIR = os.path.join(APP_DIR, "db")                                                        # Directory for database files
 DB_FILE = os.path.join(DB_DIR, "bc.db")                                                     # Database file
-os.makedirs(DB_DIR, exist_ok=True)
 
 LOCK_FILE = os.path.join(APP_DIR, ".bc.lock")                                               # Run lock file (flock)
 
