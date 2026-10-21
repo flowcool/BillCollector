@@ -47,7 +47,8 @@ def git_commit(paths, message: str, repo=None) -> tuple:
         added = _git(repo, "add", "--", *[str(p) for p in paths])
         if added.returncode != 0:
             return False, _tail(added.stderr or added.stdout)
-        committed = _git(repo, "commit", "-m", message)
+        committed = _git(repo, "commit", "--only", "-m", message, "--",
+                         *[str(p) for p in paths])
         if committed.returncode != 0:
             out = (committed.stderr or "") + (committed.stdout or "")
             if "nothing to commit" in out or "no changes added" in out:

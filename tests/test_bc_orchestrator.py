@@ -28,6 +28,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps"))
@@ -466,7 +467,8 @@ class OrphanCleanupTests(OrchestratorTestBase):
         task_id = self.db.create_task("svc", "u1", enabled=True)
         run_id = self.db.create_run(task_id, pid=os.getpid())
         self.db.set_task_status(task_id, "running")
-        self.assertEqual(self.orch.cleanup_orphans(), 0)
+        with mock.patch.object(self.orch, "_runner_matches", return_value=True):
+            self.assertEqual(self.orch.cleanup_orphans(), 0)
         self.assertIsNone(self.db.get_run(run_id)["result"])
         self.assertEqual(self.db.get_task(task_id)["status"], "running")
 

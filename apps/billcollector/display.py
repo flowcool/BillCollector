@@ -249,7 +249,9 @@ def start_display_stack(display, rfb_auth_file=None, websockify_port=None,
             vnc_args += ["-nopw"]
         children.append(_spawn(bins["x11vnc"], *vnc_args, env=env))
 
-        ws_args = [websockify_port, f"127.0.0.1:{VNC_BASE_PORT + display}"]
+        listen = (str(websockify_port) if rfb_auth_file is not None
+                  else f"127.0.0.1:{websockify_port}")
+        ws_args = [listen, f"127.0.0.1:{VNC_BASE_PORT + display}"]
         if NOVNC_WEB_DIR.is_dir():
             ws_args = ["--web", str(NOVNC_WEB_DIR), *ws_args]
         children.append(_spawn(bins["websockify"], *ws_args, env=env))

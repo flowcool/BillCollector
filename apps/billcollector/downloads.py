@@ -2,16 +2,18 @@
 """Download tracking, per-task sha256 dedup, and the post-download hook
 (decision 14).
 
-Runs inside the runner subprocess: every downloaded file is dropped into the
-download folder (DMS-agnostic, unchanged) and tracked in the ``Download``
-table. A file whose sha256 was already seen for this task is recorded as a
-duplicate (``duplicate_of_id``) and the consumer hook is NOT re-run for it -
-the hook slot is for document consumers that must see each document once.
+Runs inside the runner subprocess: new content is published without replacing
+an existing document. Every attempt is tracked in the ``Download`` table.
+Content already seen for this task reuses its saved path, is recorded with
+``duplicate_of_id``, and does not re-enter the output folder or consumer hook.
 """
 
 import hashlib
 import logging
 import os
+import shutil
+import tempfile
+from pathlib import Path
 
 from . import config
 from .consumers import CONSUMERS
@@ -38,6 +40,24 @@ def download_dir(db):
     return value if value else str(config.DOWNLOAD_DIR)
 
 
+def _publish_unique(source, target_dir, filename):
+    # Stage only new content on the destination filesystem. The final link is
+    # atomic and fails on an existing file, including another task's output.
+    stem, ext = os.path.splitext(filename)
+    with tempfile.TemporaryDirectory(prefix=".bc-publish-", dir=target_dir) as tmp:
+        staged = Path(tmp) / "document.part"
+        shutil.copyfile(source, staged)
+        index = 0
+        while True:
+            name = filename if index == 0 else f"{stem} ({index}){ext}"
+            final = Path(target_dir) / name
+            try:
+                os.link(staged, final)
+                return str(final)
+            except FileExistsError:
+                index += 1
+
+
 def track_download(download, run_id, task, db):
     """Save one Playwright ``Download`` and record it in the DB.
 
@@ -47,17 +67,22 @@ def track_download(download, run_id, task, db):
     """
     target_dir = download_dir(db)
     os.makedirs(target_dir, exist_ok=True)
-    filename = str(download.suggested_filename)
-    saved_path = os.path.join(target_dir, filename)
-    download.save_as(saved_path)
-
-    sha = sha256_of(saved_path)
-    size = os.path.getsize(saved_path)
+    filename = str(download.suggested_filename).replace("\\", "/").rsplit("/", 1)[-1]
+    if filename in ("", ".", ".."):
+        filename = "download"
     task_id = task["id"]
     retained_url = sanitize_url(str(download.url))
-
-    existing = db.find_download_by_sha(task_id, sha)
-    duplicate = existing is not None
+    staging_root = config.RUN_DIR / str(run_id)
+    staging_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="download-", dir=staging_root) as tmp:
+        staged = Path(tmp) / "document.part"
+        download.save_as(str(staged))
+        sha = sha256_of(staged)
+        size = staged.stat().st_size
+        existing = db.find_download_by_sha(task_id, sha)
+        duplicate = existing is not None
+        saved_path = (existing["saved_path"] if duplicate else
+                      _publish_unique(staged, target_dir, filename))
     if duplicate:
         logger.info(f"Download {filename} already tracked for this task "
                     f"(sha256 {sha[:12]}, duplicate of Download {existing['id']}).")

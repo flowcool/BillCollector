@@ -174,6 +174,19 @@ class Orchestrator:
                 logger.exception("log subscriber raised for task %s; "
                                  "subscriber skipped", task_id)
 
+    def _runner_matches(self, pid: int, task_id: int) -> bool:
+        if not _pid_alive(pid):
+            return False
+        try:
+            args = Path(f"/proc/{pid}/cmdline").read_bytes().rstrip(b"\0").split(b"\0")
+        except FileNotFoundError:
+            return not Path("/proc").is_dir()  # preserve non-Linux behavior
+        except OSError:
+            # Identity is unknown: do not reclaim a potentially active runner.
+            return True
+        expected = [*self._runner_cmd, "run", str(task_id)]
+        return args == [os.fsencode(arg) for arg in expected]
+
     def cleanup_orphans(self) -> int:
         """Startup hook: mark leftover active runs whose runner process is
         dead as ``interrupted`` (C7.4).
@@ -189,7 +202,7 @@ class Orchestrator:
         Returns the number of runs interrupted."""
         count = 0
         for run in self._db.list_active_runs():
-            if run["pid"] is not None and _pid_alive(run["pid"]):
+            if run["pid"] is not None and self._runner_matches(run["pid"], run["task_id"]):
                 continue
             self._db.update_run(run["id"], result="interrupted", ended_at=now())
             if run["display"] is not None:
@@ -229,6 +242,7 @@ class Orchestrator:
             row = self._db.get_run_for_pid(task_id, proc.pid)
             if row is not None and row["result"] is None:
                 self._db.update_run(row["id"], result="interrupted", ended_at=now())
+                self._release_dead_display(row, proc.pid)
             self._db.set_task_status(task_id, "idle")
             logger.info("shutdown: runner for task %s terminated (pid %s)",
                         task_id, proc.pid)
@@ -432,6 +446,19 @@ class Orchestrator:
             self._monitors.pop(task_id, None)
             self._semaphore.release()
 
+    @staticmethod
+    def _release_dead_display(row, pid):
+        if row["display"] is None:
+            return
+        lock = display.lock_path_for(row["display"])
+        try:
+            if lock.read_text(encoding="utf-8").strip() == str(pid):
+                lock.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("Could not release dead runner display lock")
+
     def _finalize_run(self, task_id: int, pid: int, exit_code: int, tail) -> None:
         """Finalize the Run row the subprocess created (module docstring)."""
         row = self._db.get_run_for_pid(task_id, pid)
@@ -461,6 +488,7 @@ class Orchestrator:
             else:
                 updates["result"] = "failure"
             updates["ended_at"] = now()
+            self._release_dead_display(row, pid)
             self._db.set_task_status(task_id, "idle")
         if exit_code > 0:
             # A real non-zero exit: append the traceback tail (a

@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps"))
 
+from billcollector import config
 from billcollector import db as bcd  # noqa: E402
 
 
@@ -19,10 +20,13 @@ class ProfileResetTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        self._old_profiles = config.PROFILE_ROOT
+        config.PROFILE_ROOT = self.root / "profiles"
         self.db = bcd.Database(path=self.root / "test.db")
 
     def tearDown(self):
         self.db.close()
+        config.PROFILE_ROOT = self._old_profiles
         self.tmp.cleanup()
 
     def task_columns(self, conn):

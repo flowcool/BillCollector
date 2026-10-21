@@ -16,7 +16,8 @@ from fastapi import Request
 from nicegui import ui
 
 from ..db import Database
-from .auth import MIN_PASSWORD_LENGTH, hash_password, require_auth, set_password_hash
+from .auth import (MIN_PASSWORD_LENGTH, hash_password, password_too_long,
+                   require_auth, set_password_hash)
 from .layout import build_layout
 
 # (key, label, kind, hint): one row per daemon setting. ``kind`` drives
@@ -90,6 +91,10 @@ def register_settings(db: Database) -> None:
                             f"Password must be at least "
                             f"{MIN_PASSWORD_LENGTH} characters.",
                             type="negative")
+                        return
+                    if password_too_long(new):
+                        ui.notify("Password must be at most 72 UTF-8 bytes.",
+                                  type="negative")
                         return
                     if new != confirm:
                         ui.notify("The two password fields must match.",

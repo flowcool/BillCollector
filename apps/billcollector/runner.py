@@ -621,6 +621,8 @@ def _execute_wait_user_step(ctx, step, method):
         # pause that was just resumed.
         remaining_ms = max(
             (ctx.last_pause_deadline - datetime.now()).total_seconds() * 1000, 0)
+        if remaining_ms < 1:
+            continue  # timeout=0 disables Playwright deadlines
         try:
             until_locator.wait_for(state="visible", timeout=remaining_ms)
         except PlaywrightTimeoutError:

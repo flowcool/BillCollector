@@ -346,7 +346,7 @@ class WaitingLoopTests(PauseTestBase):
         self.assertEqual(json.loads(run["pause_context"])["step_number"], 3)
         self.assertEqual(run["control_sock"], str(sock_path))
         self.assertFalse(sock_path.exists())
-        self.assertEqual(self.db.get_task(1)["status"], "waiting")
+        self.assertEqual(self.db.get_task(1)["status"], "running")
 
     def test_cancel_aborts_the_pause(self):
         thread, outcome = self._run_pause(

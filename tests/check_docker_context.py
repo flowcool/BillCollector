@@ -21,7 +21,7 @@ def main():
     args = parser.parse_args()
     excluded = (
         "apps/.env", "apps/.env.local", "apps/bc.log",
-        "apps/.bc.lock", "apps/recipes_playwright/.code/recorded.py", "apps/db/bc.db",
+        "apps/.bc_ui_run.json", "apps/.bc.lock", "apps/recipes_playwright/.code/recorded.py", "apps/db/bc.db",
         "apps/browser/profile/Default/Cookies",
         "apps/data/runs/1/pause_1.png", "apps/data/displays/display-99.lock",
         "apps/Downloads/invoice.pdf", "apps/.venv/lib/private.py",

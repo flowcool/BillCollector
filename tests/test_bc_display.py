@@ -160,7 +160,7 @@ class DisplayStackTests(DisplayTestBase):
                 # the websockify child is the spawn targeting the localhost
                 # RFB port; its listen port defaults to 6080 for :99
                 ws_args = next(a for a in spawned if "127.0.0.1:5999" in a)
-                self.assertIn(6080, ws_args)
+                self.assertIn("127.0.0.1:6080", ws_args)
             finally:
                 display.stop_display_stack(children)
 

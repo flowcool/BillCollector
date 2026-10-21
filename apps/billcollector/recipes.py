@@ -112,19 +112,13 @@ def parse_steps(data) -> list:
     return steps
 
 
-# Methods that end a step's locator chain: the element actions
-# (click/fill/press), the page-level methods (goto/close), and the
-# special step methods (expect_download, wait_user). Everything before
-# the first of these is the step's locator prefix - the locator
-# methods plus the chain-continuing methods (first, content_frame, ...)
-# that still produce the locator (or frame) the actions act on. The
-# runner's pause-context heuristic (transform_step_to_json) also calls
-# first/content_frame "actions"; for the repair flow they belong to the
-# chain, because the candidate is the full locator of the real element
-# and replaces the whole chain (decision 7).
-_CHAIN_END_METHODS = frozenset({
-    "click", "fill", "press", "goto", "close",
-    "expect_download", "wait_user",
+# Only known locator-producing methods belong to the replaceable prefix.
+# Unknown methods and all actions stay intact during candidate repair.
+_LOCATOR_METHODS = frozenset({
+    "locator", "get_by_role", "get_by_label", "get_by_text", "get_by_title",
+    "get_by_alt_text", "get_by_placeholder", "get_by_test_id",
+    "first", "last", "nth", "filter", "and_", "or_", "frame_locator",
+    "content_frame",
 })
 
 
@@ -161,7 +155,7 @@ def _locator_prefix_len(step) -> int:
     count = 0
     for method_entry in step.get("methods") or []:
         name = method_entry.get("method") if isinstance(method_entry, dict) else None
-        if name in _CHAIN_END_METHODS:
+        if name not in _LOCATOR_METHODS:
             break
         count += 1
     return count

@@ -87,12 +87,28 @@ def chromium_args() -> list[str]:
     return os.environ.get("BC_CHROMIUM_ARGS", "").split()
 
 
+def _validate_component(value: str) -> None:
+    if value in (".", "..") or any(c in value for c in ("/", "\\", "\x00")):
+        raise ValueError("Service and user must be single path components")
+
+
+def checked_profile_path(path) -> Path:
+    root = PROFILE_ROOT.resolve()
+    resolved = Path(path).resolve()
+    if resolved == root or root not in resolved.parents:
+        raise ValueError("Profile path must stay strictly below PROFILE_ROOT")
+    return Path(path)
+
+
 def recipe_path_for(service: str) -> Path:
     """Path of the per-service recipe file, e.g. recipe-pw__winsim.yaml."""
+    _validate_component(service)
     return RECIPE_DIR / f"{RECIPE_PREFIX}{service.lower().replace(' ', '_')}.yaml"
 
 
 def profile_dir_for(service: str, user: str) -> Path:
     """Per-task persistent browser profile directory (decision 9)."""
+    _validate_component(service)
+    _validate_component(user)
     safe = f"{service}_{user}".strip("_").replace(" ", "_").lower()
-    return PROFILE_ROOT / (safe or "default")
+    return checked_profile_path(PROFILE_ROOT / (safe or "default"))

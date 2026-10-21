@@ -112,12 +112,17 @@ def open_task_dialog(db: Database, scheduler: TaskScheduler, refresh,
                     ui.notify(f"Task {service} / {user or '—'} already exists",
                               type="warning")
                     return
-                recipe = config.recipe_path_for(service)
+                try:
+                    profile = config.profile_dir_for(service, user)
+                    recipe = config.recipe_path_for(service)
+                except ValueError as e:
+                    ui.notify(str(e), type="negative")
+                    return
                 new_id = db.create_task(
                     service, user,
                     recipe_file=str(recipe),
                     enabled=enabled, cron=cron,
-                    profile_dir=str(config.profile_dir_for(service, user)))
+                    profile_dir=str(profile))
                 scheduler.sync_task(new_id)
                 ui.notify(f"Task {service} / {user or '—'} created")
                 if not recipe.exists():

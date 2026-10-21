@@ -28,6 +28,7 @@ from . import auth
 logger = logging.getLogger("billcollector.ui.login")
 
 _ERRORS = {
+    "too_long": "Password must be at most 72 UTF-8 bytes.",
     "too_short": ("Password must be at least "
                   f"{auth.MIN_PASSWORD_LENGTH} characters."),
     "mismatch": "The two password fields must match.",
@@ -89,6 +90,8 @@ def register_login_page(db) -> None:
             confirm = str(form.get("password_confirm") or "")
             if len(password) < auth.MIN_PASSWORD_LENGTH:
                 return RedirectResponse("/login?error=too_short", status_code=303)
+            if auth.password_too_long(password):
+                return RedirectResponse("/login?error=too_long", status_code=303)
             if password != confirm:
                 return RedirectResponse("/login?error=mismatch", status_code=303)
             auth.set_password_hash(db, auth.hash_password(password))

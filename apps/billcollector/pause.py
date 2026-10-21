@@ -283,6 +283,7 @@ def pause_loop(ctx, reason, prompt, step_action_json, error, step_number=None):
         while True:
             server.poll(PAUSE_POLL_SECONDS)
             if server.resume_requested:
+                db.set_task_status(ctx.task["id"], "running")
                 return "resume"
             if server.cancel_requested:
                 return "cancel"

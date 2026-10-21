@@ -181,3 +181,14 @@ async def test_password_change_validates_length_and_match(user, testdb):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+async def test_password_change_rejects_more_than_72_utf8_bytes(user, testdb):
+    await _login(user, testdb)
+    await user.open("/settings")
+    password = "\u00e9" * 37
+    _field(user, "password-new").value = password
+    _field(user, "password-confirm").value = password
+    user.find(marker="set-save-password").click()
+    assert user.notify.contains("at most 72 UTF-8 bytes")
+    assert auth.verify_password(GOOD_PASSWORD, auth.get_password_hash(testdb))

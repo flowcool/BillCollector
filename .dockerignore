@@ -17,3 +17,4 @@
 apps/browser
 apps/db
 /apps/data/
+/apps/.bc_ui_run.json

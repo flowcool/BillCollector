@@ -16,6 +16,7 @@ import logging
 import time
 from datetime import datetime
 
+from .interrupt import RunInterrupted
 from .redaction import sanitize_url
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,8 @@ class PageState:
             for attempt in range(1, max_attempts + 1):
                 try:
                     return page.evaluate(script)  # Try evaluating
+                except RunInterrupted:
+                    raise
                 except Exception as e:
                     logger.debug(f"Attempt {attempt}: Evaluation failed - {e}")
                     time.sleep(1)  # Short delay before retrying

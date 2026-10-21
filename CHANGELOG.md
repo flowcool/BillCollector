@@ -94,6 +94,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Fork daemon alignment review: keep passwordless noVNC local, preserve
+  downloaded documents and skip duplicate publication, validate profile paths
+  before reset, isolate pytest state, restrict recipe commits, and preserve
+  shutdown, display cleanup, pause, INI-import and locator-repair invariants.
+- Validate the bcrypt UTF-8 byte limit in password forms. Invalid environment
+  passwords fail startup with a fixed diagnostic instead of opening setup mode.
+
 - Update fork runtime pins to aiohttp 3.14.4 and certifi 2026.10.19 for
   the published security advisories affecting the prior pins.
 

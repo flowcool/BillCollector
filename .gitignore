@@ -14,3 +14,4 @@ db/
 .bc.lock
 openwiki/.run.json
 /apps/data/
+/apps/.bc_ui_run.json

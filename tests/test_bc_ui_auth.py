@@ -105,3 +105,13 @@ async def test_alive_is_public_without_authentication(user):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+async def test_first_password_rejects_more_than_72_utf8_bytes(user, testdb):
+    password = "\u00e9" * 37
+    response = await user.http_client.post(
+        "/login", data={"password": password, "password_confirm": password},
+        follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?error=too_long"
+    assert auth.get_password_hash(testdb) is None

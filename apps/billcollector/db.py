@@ -166,6 +166,11 @@ class Database:
             return False, (f"task {task_id} is {task['status']}; "
                            "reset the profile only while idle")
         profile = task["profile_dir"]
+        if profile:
+            try:
+                config.checked_profile_path(profile)
+            except ValueError as e:
+                return False, str(e)
         if profile and os.path.isdir(profile):
             try:
                 shutil.rmtree(profile)
@@ -193,7 +198,8 @@ class Database:
         confirmed in the UI") with a default monthly cron. Runs only when the
         Task table is still empty; duplicate (service, user) pairs across files are imported only once. Returns the number of tasks created.
         """
-        if self.conn.execute("SELECT COUNT(*) c FROM Task").fetchone()["c"]:
+        if (self.get_setting("ini_imported") == "1"
+                or self.conn.execute("SELECT COUNT(*) c FROM Task").fetchone()["c"]):
             return 0
         created = 0
         for ini in (ini_paths if ini_paths is not None else config.INI_FILES):

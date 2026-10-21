@@ -25,6 +25,11 @@ logger = logging.getLogger("billcollector.ui.auth")
 
 PUBLIC_PATHS = ("/login", "/_alive")
 MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_BYTES = 72
+
+
+def password_too_long(password: str) -> bool:
+    return len(password.encode("utf-8")) > MAX_PASSWORD_BYTES
 
 
 def hash_password(password: str) -> str:
@@ -66,6 +71,8 @@ def ensure_password(db: Database, env_password: str | None = None) -> bool:
     if env_password is None:
         env_password = os.environ.get("BC_UI_PASSWORD")
     if env_password:
+        if password_too_long(env_password):
+            raise ValueError("BC_UI_PASSWORD exceeds the 72-byte bcrypt limit")
         set_password_hash(db, hash_password(env_password))
         logger.info("ui password hash seeded from BC_UI_PASSWORD")
         return True

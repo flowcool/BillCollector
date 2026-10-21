@@ -216,9 +216,10 @@ async def test_detail_stop_routes_to_stop_run(user, testdb, tmp_path,
     assert started == []
 
 
-async def test_reset_profile_confirms_then_resets(user, testdb, tmp_path):
+async def test_reset_profile_confirms_then_resets(user, testdb, tmp_path, monkeypatch):
     """Reset profile: the confirmation dialog, then the profile dir is
     gone and ``profile_reset_at`` is recorded (D3.4/D4.1)."""
+    monkeypatch.setattr(config, "PROFILE_ROOT", tmp_path)
     profile = tmp_path / "profile-svc-p"
     profile.mkdir()
     task = testdb.create_task("svc-p", "user1", profile_dir=str(profile))
