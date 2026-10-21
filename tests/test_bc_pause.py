@@ -178,6 +178,12 @@ class BuildPauseContextTests(PauseTestBase):
         self.assertEqual(elements[0]["rect"], {"x": 10, "y": 20, "w": 100, "h": 30})
         self.assertEqual(elements[2]["actionTypes"], ["click", "fill"])
 
+    def test_context_url_drops_query_and_fragment(self):
+        self.page.url = "https://portal.invalid/account?session=synthetic-secret#details"
+        context = pause.build_pause_context(
+            self.ctx, "wait_user", "p", None, None, "d")
+        self.assertEqual(context["url"], "https://portal.invalid/account")
+
     def test_step_number_defaults_to_none(self):
         # M3 decision 8: a pause without a step carries step_number=None.
         context = pause.build_pause_context(self.ctx, "wait_user", "p", None, None, "d")
@@ -202,6 +208,19 @@ class BuildPauseContextTests(PauseTestBase):
         self.assertEqual(context["elements"], [])
         self.assertIsNone(context["screenshot"]["path"])
         self.assertIsNone(context["screenshot"]["data"])
+
+    def test_context_elements_carry_the_optional_id(self):
+        # ELEMENTS[1] (the input) gets a markup id; ELEMENTS[0] (the button)
+        # has none, so its entries must not gain an "id" key.
+        self.page.elements[1]["id"] = "otp-input"
+        context = pause.build_pause_context(
+            self.ctx, "wait_user", "p", None, None, "d")
+        elements = context["elements"]
+        self.assertEqual([e["n"] for e in elements], [1, 2, 3, 4])
+        self.assertEqual(elements[2]["id"], "otp-input")
+        self.assertEqual(elements[3]["id"], "otp-input")
+        self.assertNotIn("id", elements[0])
+        self.assertNotIn("id", elements[1])
 
 
 class PersistPauseTests(PauseTestBase):
