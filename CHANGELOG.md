@@ -45,6 +45,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Update fork runtime pins to aiohttp 3.14.4 and certifi 2026.10.19 for
+  the published security advisories affecting the prior pins.
+
 - Avoid recommended development packages in the initial Python APT install,
   keeping DejaVu fonts explicit to preserve browser/UI font fallback.
 
