@@ -160,7 +160,11 @@ The basic example exposes only the UI on host loopback. It does not provide
 remote browser access. To use an existing authenticated proxy, set
 `BC_PUBLIC_URL=https://your-collector.example` and `BC_PROXY_NETWORK` to the
 private proxy network, then add the [proxy override](../compose/daemon.proxy.compose.yaml).
-Do not expose that network to unrelated containers.
+The proxy and vault overrides attach only their explicit networks; they remove
+the implicit default-network attachment. Combine both overrides when needed.
+Websockify listens on all attached networks. Every peer on the proxy or vault
+network must therefore be trusted to access the browser directly. Use dedicated
+networks with only the proxy and vault sidecar; attach no unrelated containers.
 
 Route and authenticate both backends on the same origin:
 

@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -25,6 +26,24 @@ def command(args, *, environment=None, timeout=120):
     return result.stdout
 
 
+def cleanup_lab(actions):
+    """Attempt every cleanup and retain a test failure ahead of cleanup errors."""
+    original = sys.exc_info()[1]
+    errors = []
+    for action in actions:
+        try:
+            action()
+        except BaseException as error:
+            errors.append(error)
+    if errors:
+        primary = original if original is not None else errors[0]
+        for error in errors:
+            if error is not primary:
+                primary.add_note(f"Additional lab cleanup failure: {error!r}")
+        if original is None:
+            raise primary
+
+
 def check(image, uid):
     environment = {k: v for k, v in os.environ.items()
                    if not k.startswith(("BC_", "BW_", "VAULT_", "COMPOSE_", "BEADS_"))}
@@ -33,7 +52,19 @@ def check(image, uid):
     if not endpoint.startswith("unix://") or environment.get("DOCKER_HOST", "unix://").startswith(("tcp:", "ssh:")):
         raise RuntimeError("The synthetic lab requires a local Unix-socket Docker engine")
     environment.update(BC_IMAGE=image, BC_UID=str(uid), BC_GID="1000")
-    with tempfile.TemporaryDirectory(prefix="bc-compose-lab-") as directory:
+    # Render the real overlays without creating or joining external networks.
+    for files, networks in ((["proxy"], {"proxy"}), (["vault"], {"vault"}),
+                            (["proxy", "vault"], {"proxy", "vault"})):
+        render = ["docker", "compose", "-f", str(ROOT / "compose/daemon.compose.yaml")]
+        for name in files:
+            render.extend(["-f", str(ROOT / f"compose/daemon.{name}.compose.yaml")])
+        rendered = json.loads(command(render + ["config", "--format", "json"],
+                                      environment=environment | {
+                                          "BC_PROXY_NETWORK": "synthetic-proxy",
+                                          "BC_VAULT_NETWORK": "synthetic-vault"}))
+        assert set(rendered["services"]["billcollector"]["networks"]) == networks
+    print("PASS proxy/vault overlays omit the implicit default network", flush=True)
+    with tempfile.TemporaryDirectory(prefix="bc-compose-lab-", ignore_cleanup_errors=True) as directory:
         temporary = Path(directory)
         certs = temporary / "certs"
         certs.mkdir()
@@ -151,11 +182,13 @@ def check(image, uid):
             assert not unexpected, unexpected
             print(f"PASS uid={uid} headed collection, dedup and persistent browser cookie", flush=True)
         finally:
+            actions = []
             if runner is not None and runner.poll() is None:
-                execute("stop", "--timeout", "30", "billcollector")
-                runner.wait(timeout=40)
-            execute("down", "-v", "--remove-orphans")
-            provision(os.getuid())
+                actions.extend([lambda: execute("stop", "--timeout", "30", "billcollector"),
+                                lambda: runner.wait(timeout=40)])
+            actions.extend([lambda: execute("down", "-v", "--remove-orphans"),
+                            lambda: provision(os.getuid())])
+            cleanup_lab(actions)
 
 
 def main():

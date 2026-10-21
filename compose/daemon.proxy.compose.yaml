@@ -6,7 +6,6 @@ services:
       BC_NOVNC_PATH: /browser
       BC_NOVNC_HOST: 0.0.0.0
     networks:
-      default: {}
       proxy: {}
 
 networks:
