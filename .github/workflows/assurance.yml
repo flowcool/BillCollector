@@ -148,6 +148,7 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             SOURCE=${{ github.server_url }}/${{ github.repository }}
+            REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Smoke test the image without network access
