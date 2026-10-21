@@ -57,6 +57,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 
 from fastapi import Request
 from nicegui import ui
@@ -122,6 +123,25 @@ NOVNC_SRC_SCRIPT = """
 })();
 </script>
 """
+
+
+def novnc_src_script() -> str:
+    """Use an optional same-origin proxy path; keep direct-port access by default.
+
+    The proxy must strip this prefix and forward HTTP and WebSocket requests
+    to one display. Configure display_count=1 when using a fixed backend port.
+    """
+    prefix = os.environ.get("BC_NOVNC_PATH", "").rstrip("/")
+    if not prefix:
+        return NOVNC_SRC_SCRIPT
+    if not re.fullmatch(r"/[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*", prefix):
+        raise ValueError("BC_NOVNC_PATH must be an absolute URL path prefix")
+    direct = ("'http://' + window.location.hostname + ':' + port +\n"
+              "        '/vnc.html?autoconnect=true'")
+    proxied = ("window.location.origin + " + json.dumps(prefix) +
+               " + '/vnc.html?autoconnect=true&path=' + "
+               "encodeURIComponent(" + json.dumps(prefix.lstrip("/") + "/websockify") + ")")
+    return NOVNC_SRC_SCRIPT.replace(direct, proxied)
 
 
 def control_sock_alive(run) -> bool:
@@ -300,7 +320,7 @@ def register_session(db: Database) -> None:
         build_layout()
         # The noVNC iframes of the alive states get their src client-side
         # (M3 decision 6): one URL works for localhost and LAN operators.
-        ui.add_body_html(NOVNC_SRC_SCRIPT)
+        ui.add_body_html(novnc_src_script())
         run = db.get_run(run_id)
         if run is None:
             ui.label(f"Unknown run id: {run_id} (404)").classes("text-red-600")

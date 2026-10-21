@@ -69,3 +69,7 @@ VOLUME ["/apps/Downloads"]
 
 # Entry point
 CMD ["/bin/bash"]
+
+# Revision metadata follows dependency installation to preserve build caches.
+ARG REVISION=unknown
+LABEL org.opencontainers.image.revision="${REVISION}"
