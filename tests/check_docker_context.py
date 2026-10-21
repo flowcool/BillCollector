@@ -20,9 +20,10 @@ def main():
     parser.add_argument("--dockerignore", type=Path, default=ROOT / ".dockerignore")
     args = parser.parse_args()
     excluded = (
-        "apps/.env", "apps/.env.local", "apps/bc.log", "apps/.bc_ui_run.json",
-        "apps/.bc.lock", "apps/recipes_playwright/.code/recorded.py", "apps/db/bc.db",
+        "apps/.env", "apps/.env.local", "apps/bc.log",
+        "apps/.bc_ui_run.json", "apps/.bc.lock", "apps/recipes_playwright/.code/recorded.py", "apps/db/bc.db",
         "apps/browser/profile/Default/Cookies",
+        "apps/data/runs/1/pause_1.png", "apps/data/displays/display-99.lock",
         "apps/Downloads/invoice.pdf", "apps/.venv/lib/private.py",
         "apps/__pycache__/private.pyc", "apps/nested/.env",
         # Root deploy config, git metadata, rotated logs and other .gitignore'd artifacts.

@@ -27,6 +27,8 @@ jobs:
     name: Unit and browser tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/apps/browser
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,14 +39,27 @@ jobs:
           cache: pip
           cache-dependency-path: |
             apps/requirements.txt
+            apps/requirements-dev.txt
             .github/requirements-security.txt
-      - run: python -m pip install -r apps/requirements.txt -r .github/requirements-security.txt
+      - run: python -m pip install -r apps/requirements.txt -r apps/requirements-dev.txt -r .github/requirements-security.txt
       - run: python -m pip check
       - run: python -m compileall -q apps tests
       - run: bash -n BillCollector.sh
       - run: ruff check --select F821 apps tests
-      - run: python -m unittest discover -s tests -v
       - run: python -m playwright install --with-deps chromium
+      - run: LC_ALL=C python -m pytest tests/ -q
+      - name: Run isolated mock portal regression
+        run: |
+          python - <<'PYTHON'
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, "apps")
+          from BillCollectorServices_pw import DatabaseManager
+          Path("apps/db").mkdir(exist_ok=True)
+          db = DatabaseManager("apps/db/bc.db")
+          db.conn.close()
+          PYTHON
+          python tests/run_regression.py --ini tests/bc_regression.ini
       - name: Smoke test Chromium without a portal or vault
         run: |
           python - <<'PYTHON'

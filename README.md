@@ -12,7 +12,7 @@
   - [Vault of Secrets](#vault-of-secrets)
   - [Enabling DNS and HTTPS with Let's Encrypt certs](#enabling-dns-and-https-with-lets-encrypt-certs)
   - [The BillCollector Installation](#the-billcollector-installation-and-docker-deployment)
-  - [Manual Run UI](#manual-run-ui)
+  - [Web UI](#web-ui)
 - [Configure BillCollector](#configuration)
   - [Vaultwarden and Bitwarden](#vaultwarden-and-bitwarden)
   - [Local Development & Debugging](#local-development--debugging)
@@ -44,6 +44,8 @@ Following diagram depicts the complete BillCollector Ecosystem:
 
 Scheduled, for instance, bi-monthly, your server's cron daemon runs the BillCollector docker container which exposes a download folder to the server's file system. The docker container integrates Chromium (via Playwright) to interact with the service provider's online portal.
 
+BillCollector also ships as a self-hosted daemon with a web UI that schedules the runs, supervises them live, and lets you step in when a portal changes (see [Web UI](#web-ui)); the cron-driven batch mode described here keeps working unchanged alongside it.
+
 For each container run, BillCollector scripts the `List of Services`, gets the secret login data from Vaultwarden via the Bitwarden API, accesses the web service via the configured Playwright recipes, and downloads the documents.
 
 Every step of every service run is recorded in a local SQLite database (`apps/db/bc.db`): the method chain that was executed, the interactive elements that were found on the page, and the result. This makes failed runs diagnosable and is the foundation for the planned self-healing/assisted-repair features. A failed service/user pair aborts only its own run: the remaining services continue, every started run is finalized in the DB, and the process exits with code 1 if any pair failed. A second concurrent start (overlapping cron starts, UI run plus manual run) is rejected by a `flock` guard.
@@ -68,7 +70,7 @@ With a document-processing document management system (DMS) such as Paperless ng
 
 External contributions are welcome and credited:
 
-- [flowcool](https://github.com/flowcool) — secret-free vault request diagnostics (PR #11), Docker build context hardening that keeps private runtime artifacts out of the image (PR #12), and the vault transport: in-process DNS vetting with requests pinned to validated local targets (PR #13).
+- [flowcool](https://github.com/flowcool) — secret-free vault request diagnostics (PR #11), Docker build context hardening that keeps private runtime artifacts out of the image (PR #12), the vault transport: in-process DNS vetting with requests pinned to validated local targets (PR #13), and Playwright image hardening that validates Python dependencies at build time and strips the pip/wheel installers from the runtime image (PR #16).
 
 ## Quick Start
 
@@ -167,15 +169,30 @@ Python dependencies are validated during the image build. The final container
 does not include `pip` or `wheel`; update `apps/requirements.txt` and rebuild the
 image when changing dependencies. Local virtual environments keep their installers.
 
-### Manual Run UI
+### Web UI
 
-Besides cron, BillCollector ships with a minimal web UI for manual runs. From the `apps` directory run:
+Besides the cron-driven batch run, BillCollector ships as a self-hosted daemon with a web UI for scheduling, running, and supervising tasks. From the `apps` directory run:
 
 ```bash
-python3 bc_ui.py
+python3 -m billcollector serve
 ```
 
-This opens a NiceGUI supervisor page on port 8000 where you select an INI file and a service, start or stop the run of that single service, and watch its output line by line. The UI is a pure subprocess supervisor: it launches `BillCollector.py <ini> --service <NAME>` and streams its stdout, so the scraping code stays untouched. A run left behind by a previous UI instance is cleaned up when the UI starts.
+The daemon binds to `127.0.0.1:8000` by default (`--host`/`--port`, or `BC_UI_HOST`, override both). The first start shows a set-password form (or seeds the password from `BC_UI_PASSWORD` in `apps/.env`); afterwards you sign in with that password.
+
+On the first start (while the task list is still empty), the `[Playwright]` sections of `bc_default.ini` and `bc_test.ini` are imported as tasks - each (service, user) pair becomes one task, initially **disabled**, with a default monthly cron. You enable a task and set its cron schedule per task from the UI; the Task table in the database is the source of truth, and the daemon rebuilds its scheduler jobs from it on every start (a missed run coalesces into a single catch-up run).
+
+The UI:
+
+- **Dashboard** (`/`) - all tasks with their status, last/next run, and latest download, a live log pane, and Run now / Stop actions per task; a `waiting` badge marks a run that is paused for operator input.
+- **Task detail** (`/tasks/<id>`) - the run history of one task with the per-step records, step screenshots, and downloads.
+- **Session** (`/runs/<id>`) - the live view of one run: while it runs, you watch the progress; while it is paused, you get the "Copilot" view - a screenshot, the numbered interactive elements, click/fill/press/drag actions, and Resume / Cancel - plus a noVNC tab that shows the actual browser window. A step that failed and paused also offers a Repair link into the recipe editor.
+- **Recipe editor** (`/recipes/<service>`) - edit the YAML recipe with schema validation, and optionally auto-commit the change to git (Settings switch).
+- **Downloads** (`/downloads`) - the downloaded files of all runs.
+- **Settings** (`/settings`) - UI password, ntfy topic, pause deadline, max concurrency, download directory, UI base URL, VNC password, and the git auto-commit switch.
+
+**Pausing a stuck run.** A non-graceful step that still fails after three attempts, a failed download, or an explicit `wait_user` recipe step does not abort the run: it pauses (the task shows `waiting`), stores a machine-readable pause context on the run, pushes an ntfy notification with a deep link to the session page, and waits - until you resume or cancel it from the UI, or the pause deadline passes (default 30 minutes, configurable in Settings). The `wait_user` method can also carry an `until` locator: the pause then completes as soon as that element appears on the page.
+
+For a cron-style single-shot run without the daemon, `python3 -m billcollector run <task_id>` executes one task run.
 
 ## Configuration
 
@@ -356,4 +373,4 @@ To contribute code, see [Contributing](#contributing).
 
 ## What's Next
 
-BillCollector is moving from a cron-driven batch tool towards a self-hosted daemon: a NiceGUI web UI that schedules the runs, watches them live, and lets you step in when a portal changes (pause, inspect the page, repair the recipe, resume). The batch system described above keeps running unchanged in the meantime. See [CHANGELOG.md](CHANGELOG.md) for the history of feature updates and changes.
+The self-hosted daemon with its web UI (per-task scheduling, live supervision, pause-and-step-in) has landed; the cron-driven batch system described above keeps running unchanged alongside it. The recorded step data and the machine-readable pause context are the foundation for the planned self-healing / assisted-repair features: when a portal changes, BillCollector pauses, shows what it found, and - with your help or on its own - adapts the recipe. See [CHANGELOG.md](CHANGELOG.md) for the history of feature updates and changes.
