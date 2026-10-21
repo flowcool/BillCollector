@@ -1,0 +1,11 @@
+# Reuse an existing bw serve sidecar on a trusted private Docker network.
+# No extra vault, secret or Bitwarden login is created by this example.
+services:
+  billcollector:
+    networks:
+      vault: {}
+
+networks:
+  vault:
+    external: true
+    name: ${BC_VAULT_NETWORK:?Set BC_VAULT_NETWORK to the existing private vault network}

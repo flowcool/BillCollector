@@ -231,7 +231,9 @@ def _start_display_stack(db, run_id, display_number):
     if password is not None and str(password).strip():
         rfb_auth = display.rfb_auth_file_for(run_id)
         display.write_rfb_auth(rfb_auth, str(password).strip())
-    return display.start_display_stack(display_number, rfb_auth_file=rfb_auth)
+    port = display.websockify_port_for(display_number, int(db.get_setting("display_start")))
+    return display.start_display_stack(display_number, rfb_auth_file=rfb_auth,
+                                       websockify_port=port)
 
 
 def _ensure_pdf_preference(profile_dir):

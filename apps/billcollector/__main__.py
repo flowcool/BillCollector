@@ -2,7 +2,13 @@
 
 import sys
 
-from billcollector.cli import main
-
 if __name__ == "__main__":
-    sys.exit(main())
+    from billcollector import config
+
+    try:
+        from billcollector.cli import main
+
+        sys.exit(main())
+    except config.ConfigurationError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        sys.exit(1)

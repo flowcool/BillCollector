@@ -59,7 +59,9 @@ COPY --chown=${APP_UID}:${APP_GID} apps/. .
 # Create the download folder and the app user's home, then hand ownership of
 # the whole /apps tree (app code, browser, downloads) and $HOME to the
 # non-root app user
-RUN mkdir -p /apps/Downloads "$HOME" && chown -R ${APP_UID}:${APP_GID} /apps "$HOME"
+RUN mkdir -p /apps/Downloads /apps/recipes /apps/data/db /apps/data/logs \
+    /apps/data/profiles /apps/data/downloads /apps/data/home /apps/data/nicegui \
+    "$HOME" && chown -R ${APP_UID}:${APP_GID} /apps "$HOME"
 
 # Keep the schema available when recipes are mounted as mutable configuration.
 COPY apps/recipes_playwright/recipe-pw-schema.yaml /opt/billcollector/recipe-pw-schema.yaml

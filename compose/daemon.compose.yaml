@@ -1,0 +1,46 @@
+# Build the current source or select a release documented to include this contract.
+# See doc/container-daemon.md before the first start or an upgrade.
+services:
+  billcollector:
+    image: ${BC_IMAGE:?Set BC_IMAGE to the built image or a validated release digest}
+    user: "${BC_UID:-1000}:${BC_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    shm_size: 1gb
+    stop_grace_period: 2m
+    command: [python3, -m, billcollector, serve]
+    ports:
+      - "127.0.0.1:${BC_HTTP_PORT:-8000}:8000"
+    environment:
+      TZ: ${TZ:-Europe/Zurich}
+      BC_UI_HOST: 0.0.0.0
+      BC_UI_PORT: "8000"
+      BC_IMPORT_INI: "false"
+      BC_DATA_DIR: /apps/data
+      BC_DB_DIR: /apps/data/db
+      BC_LOG_DIR: /apps/data/logs
+      BC_PROFILE_ROOT: /apps/data/profiles
+      BC_DOWNLOAD_DIR: /apps/data/downloads
+      BC_RECIPE_DIR: /apps/recipes
+      HOME: /apps/data/home
+      NICEGUI_STORAGE_PATH: /apps/data/nicegui
+      BC_UI_BASE_URL: ${BC_PUBLIC_URL:-http://127.0.0.1:8000}
+      BC_DISPLAY_COUNT: "1"
+      BC_MAX_CONCURRENCY: "1"
+      BW_API_URL: ${BW_API_URL:-http://bitwarden-cli:8087}
+      BW_API_HOST: ${BW_API_HOST:-127.0.0.1:8087}
+    volumes:
+      - state:/apps/data
+      - recipes:/apps/recipes
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/_alive', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    security_opt: [no-new-privileges:true]
+    cap_drop: [NET_RAW]
+
+volumes:
+  state:
+  recipes:

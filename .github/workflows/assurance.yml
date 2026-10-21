@@ -156,6 +156,8 @@ jobs:
           test "$(docker run --rm --network none --entrypoint id billcollector-playwright:ci -u)" != "0"
           docker run --rm --network none --entrypoint python3 billcollector-playwright:ci -c \
             'from playwright.sync_api import sync_playwright; p = sync_playwright().start(); b = p.chromium.launch(); b.close(); p.stop()'
+      - name: Verify the documented daemon Compose contract
+        run: python3 tests/check_container_compose.py --image billcollector-playwright:ci
       - name: Record image vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
