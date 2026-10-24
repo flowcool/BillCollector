@@ -32,6 +32,7 @@ RunInterrupted, the teardown reaps the display stack and releases the
 claim, and the run ends ``result=interrupted``.
 """
 
+import fcntl
 import json
 import logging
 import os
@@ -43,9 +44,10 @@ from helpers import CheckRecipe, ServiceObj, VARIABLE_MAP
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
-from . import config, display, downloads
+from . import collection, config, display, downloads
 from .db import Database, now
 from .interrupt import RunInterrupted
+from .login import is_login, login_options, settle_attempt, validate_login_recipe
 from .pagestate import PageState
 from .pause import pause_loop
 from .redaction import failure_category, failure_record
@@ -66,6 +68,19 @@ logger = logging.getLogger("billcollector.runner")
 # up to this many times before the run aborts (result=failure). Graceful
 # steps are single-attempt (retry non-graceful steps only).
 MAX_STEP_ATTEMPTS = 3
+
+# Collection actions have bounded side effects. They execute once per recipe
+# step instead of inheriting the generic three-attempt replay loop. An
+# operator-driven resume starts a new, explicit invocation after inspection.
+_COLLECTION_METHODS = frozenset({"click_until_absent", "download_all"})
+
+
+def _collection_methods_in(step):
+    return {
+        entry.get("method") for entry in step.get("methods", [])
+        if isinstance(entry, dict)
+        and entry.get("method") in _COLLECTION_METHODS
+    }
 
 
 class StepAbortError(Exception):
@@ -149,7 +164,8 @@ def _fresh_otp(bcs):
     try:
         totp_item = get_totp(f"{bcs.api_url}/object/totp/{bcs.vault_item_name}")
     except VaultAPIError as e:
-        logger.warning(f"OTP re-fetch failed ({e}); using run-start credential")
+        logger.warning("OTP re-fetch failed (%s); using run-start credential",
+                       failure_record("get_totp", e))
         return bcs.otp_fallback
     if totp_item is None:
         return bcs.otp_fallback
@@ -172,6 +188,8 @@ class _RunContext:
         self.debug = debug
         self.eof_noticed = False
         self.files_downloaded = []
+        self.collection_filenames = set()
+        self.collection_completed_keys = {}
         self.context = None
         self.page = None
         self.bcs = ServiceObj(
@@ -202,15 +220,23 @@ def _ensure_logging():
             format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 
-def _vault_preflight(task):
-    """Production vault preflight for one task: pinned local API URL, an
-    ``unlocked`` status, and the task's credentials.
+def _vault_preflight(task, db):
+    """Production vault preflight for one task: the effective (Settings or
+    env) API URL, a pinned local target, an ``unlocked`` status, and the
+    task's credentials.
 
-    Returns the credentials dict; raises VaultAPIError/VaultTransportError
-    on any failure (the caller maps that to a failed run)."""
-    api_url = config.env("BW_API_URL")
+    The effective (url, host) pair from ``config.vault_settings`` is
+    exported into ``os.environ`` before the vault calls, so the vault
+    transport's ``BW_API_HOST`` read (and any other env-only consumer in
+    this process) sees the same values the preflight validated. Returns
+    the credentials dict; raises VaultAPIError/VaultTransportError on any
+    failure (the caller maps that to a failed run)."""
+    api_url, api_host = config.vault_settings(db)
     if not api_url:
-        raise VaultTransportError("BW_API_URL is not set")
+        raise VaultTransportError(
+            "vault API URL is not set (Settings vault_api_url or BW_API_URL)")
+    os.environ["BW_API_URL"] = api_url
+    os.environ["BW_API_HOST"] = api_host
     pinned_api_url(api_url, VAULT_MAX_ATTEMPTS, VAULT_RETRY_BACKOFF)
     ret, status = bitwarden_api_check_status(api_url)
     if not ret or status != "unlocked":
@@ -314,7 +340,10 @@ def transform_step_to_json(step):
             continue  # Skip invalid methods
 
         # Categorize as locator or action (just a simple heuristic based on action names)
-        if method_name in ["click", "fill", "expect_download", "goto", "close", "content_frame", "first"]:
+        if method_name in [
+            "click", "fill", "expect_download", "goto", "close",
+            "content_frame", "first", "click_until_absent", "download_all",
+        ]:
             transformed_step["actions"] = transformed_step.get("actions", [])
             transformed_step["actions"].append({
                 "action": method_name,
@@ -330,7 +359,7 @@ def transform_step_to_json(step):
     return json.dumps(transformed_step, separators=(",", ":"))
 
 
-def _process_step(bcs, step):
+def _process_step(bcs, step, collection_actions=None):
     """Process a step by executing its method chain (legacy ``process_step``).
 
     Returns the step's PageState. A graceful step records its failure on the
@@ -369,6 +398,21 @@ def _process_step(bcs, step):
     # A step is "graceful" when its failure must not abort the run:
     # the error is recorded (log + DB) and the run continues with the next step.
     graceful = bool(step.get("graceful", False))
+    methods = step["methods"]
+    try:
+        collection.validate_collection_chain(methods)
+    except collection.CollectionError as e:
+        page_state.set_error({"error": [str(e)]})
+        raise StepAbortError(f"Step {step_number} failed: {e}", page_state)
+
+    if graceful and any(
+        isinstance(entry, dict)
+        and entry.get("method") in _COLLECTION_METHODS
+        for entry in methods
+    ):
+        message = "bounded collection actions cannot be graceful"
+        page_state.set_error({"error": [message]})
+        raise StepAbortError(f"Step {step_number} failed: {message}", page_state)
 
     def fail_step(error_entry):
         """Record a step failure; continue when graceful, otherwise abort the run."""
@@ -379,7 +423,7 @@ def _process_step(bcs, step):
         else:
             raise StepAbortError(f"Step {step_number} failed: {error_entry}", page_state)
 
-    for method_entry in step["methods"]:
+    for method_index, method_entry in enumerate(methods):
         method_name = method_entry.get("method")
         arguments = method_entry.get("arguments", [])
 
@@ -395,6 +439,35 @@ def _process_step(bcs, step):
                 page_state.set_error({
                     "error": [failure_record("expect_download", category="download")]
                 })
+            break
+        elif method_name in _COLLECTION_METHODS:
+            try:
+                collection.validate_terminal_action(
+                    methods, method_index, method_name
+                )
+                processed_args = [process_argument(arg, bcs) for arg in arguments]
+                if previous_result is bcs.page:
+                    raise ValueError(
+                        f"{method_name} requires a locator prefix"
+                    )
+                if (len(processed_args) != 1
+                        or not isinstance(processed_args[0], dict)):
+                    raise ValueError(
+                        f"{method_name} requires one options object"
+                    )
+                if collection_actions is None:
+                    raise RuntimeError(
+                        f"{method_name} is unavailable in this runner"
+                    )
+                collection_actions[method_name](
+                    previous_result, processed_args[0]
+                )
+            except RunInterrupted:
+                raise
+            except Exception as e:
+                fail_step({"method": method_name, "message": str(e)})
+            else:
+                page_state.set_error(step_results)
             break
         # Standard handling of methods
         else:
@@ -425,6 +498,60 @@ def _process_step(bcs, step):
                 page_state.set_error(step_results)
 
     return page_state
+
+
+def _collection_actions(ctx, step=None):
+    """Runner adapters for the shared bounded collection actions."""
+
+    collection_filenames = getattr(ctx, "collection_filenames", None)
+    if collection_filenames is None:
+        collection_filenames = set()
+        ctx.collection_filenames = collection_filenames
+    collection_filenames.update(
+        entry["suggested_filename"]
+        for entry in getattr(ctx, "files_downloaded", ())
+        if entry.get("result") == "success"
+    )
+    completed_by_step = getattr(ctx, "collection_completed_keys", None)
+    if completed_by_step is None:
+        completed_by_step = {}
+        ctx.collection_completed_keys = completed_by_step
+    completed_keys = completed_by_step.setdefault(id(step), set())
+
+    def paginate(locator, options):
+        return collection.click_until_absent(ctx.page, locator, options)
+
+    def save_download(download):
+        filename = str(download.suggested_filename)
+        if filename in collection_filenames:
+            raise collection.CollectionError(
+                "collection produced a duplicate suggested filename"
+            )
+        record = downloads.track_download(
+            download, ctx.run_id, ctx.task, ctx.db
+        )
+        collection_filenames.add(filename)
+        ctx.files_downloaded.append({
+            "url": record["url"],
+            "suggested_filename": record["filename"],
+            "result": "success",
+        })
+        return record
+
+    def download(locator, options):
+        return collection.download_all(
+            ctx.page,
+            ctx.context,
+            locator,
+            save_download,
+            options,
+            completed_keys=completed_keys,
+        )
+
+    return {
+        "click_until_absent": paginate,
+        "download_all": download,
+    }
 
 
 def check_parameter_in_json(json_str, param_dict):
@@ -487,7 +614,8 @@ def _record_step(ctx, state, step, parent_step=None):
     except RunInterrupted:
         raise  # a shutdown signal is not a screenshot failure to degrade around
     except Exception as e:
-        logger.warning(f"Step {step.get('step', 0)} screenshot failed (run continues): {e}")
+        logger.warning("Step %s screenshot failed (run continues): %s",
+                       step.get("step", 0), failure_record("screenshot", e))
     ctx.db.insert_page_status(
         ctx.run_id,
         state.step_number,
@@ -498,13 +626,19 @@ def _record_step(ctx, state, step, parent_step=None):
     )
 
 
-def _execute_step(ctx, step, parent_step=None):
+def _execute_step(ctx, step, parent_step=None, single_attempt=False):
     """Execute one step (top-level or nested) with its attempt budget.
 
     Records exactly one PageStatus row for the step (its final outcome).
     Raises StepAbortError when a non-graceful step exhausts its attempts."""
     graceful = bool(step.get("graceful", False))
-    attempts = step_attempts(graceful)
+    collection_methods = _collection_methods_in(step)
+    if parent_step is not None and collection_methods:
+        raise StepAbortError(
+            "bounded collection actions cannot be nested under "
+            "expect_download or in login phases"
+        )
+    attempts = 1 if single_attempt or collection_methods else step_attempts(graceful)
     step_number = step.get("step", 0)
 
     _debug_wait(ctx, step)
@@ -512,7 +646,9 @@ def _execute_step(ctx, step, parent_step=None):
     state = None
     for attempt in range(1, attempts + 1):
         try:
-            state = _process_step(ctx.bcs, step)
+            state = _process_step(
+                ctx.bcs, step, collection_actions=_collection_actions(ctx, step)
+            )
         except StepAbortError as e:
             if attempt < attempts:
                 logger.warning(f"Step {step_number} failed "
@@ -655,13 +791,86 @@ def _execute_step_with_pause(ctx, step):
                 method = next((entry.get("method") for entry in step.get("methods", [])
                                if entry.get("method")), None)
                 error = {"error": [failure_record(method, category="other")]}
-            prompt = _step_prompt(step, f"failed after {MAX_STEP_ATTEMPTS} attempts. "
+            attempts = 1 if _collection_methods_in(step) else MAX_STEP_ATTEMPTS
+            noun = "attempt" if attempts == 1 else "attempts"
+            prompt = _step_prompt(step, f"failed after {attempts} {noun}. "
                                        "Fix the page (or repair the recipe), then resume.")
             outcome = pause_loop(ctx, "step_failed", prompt, step_action_json, error,
                                  step.get("step", 0))
             if outcome == "resume":
                 continue
             raise PauseOutcomeAbort(outcome) from e
+
+
+def _execute_login(ctx, step):
+    """One durable transaction; each phase submits once, resume only verifies."""
+    options = login_options(step)
+    locator = _locator_for(ctx.page, options["success"])
+
+    def proven(timeout):
+        try:
+            locator.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        if not ctx.db.login_succeeded(ctx.task["id"], ctx.run_id):
+            raise StepAbortError("Another run owns the unresolved login attempt")
+        return True
+
+    if proven(options["session_timeout_ms"]):
+        return
+    phases = options["phases"]
+    start = 0
+    # Find the latest completed phase before dispatching any credentials.
+    for index in range(len(phases) - 2, -1, -1):
+        try:
+            _locator_for(ctx.page, phases[index]["success"]).wait_for(
+                state="visible", timeout=options["session_timeout_ms"])
+            start = index + 1
+            break
+        except PlaywrightTimeoutError:
+            pass
+    reserved = False
+    try:
+        for index in range(start, len(phases)):
+            phase = phases[index]
+            final = index == len(phases) - 1
+            marker = _locator_for(ctx.page, phase["success"])
+            for preparation in phase.get("steps", []):
+                _execute_step(ctx, preparation, parent_step=step["step"], single_attempt=True)
+            if not reserved:
+                if not ctx.db.reserve_login_attempt(ctx.task["id"], ctx.run_id,
+                                                    options["max_failures"]):
+                    from .notify import notify_login_locked
+                    task = ctx.db.get_task(ctx.task["id"])
+                    if task["login_locked"]:
+                        notify_login_locked(ctx.db, task)
+                    raise StepAbortError("Login attempt refused; check the task login block")
+                reserved = True
+            _execute_step(ctx, phase["submit"], parent_step=step["step"], single_attempt=True)
+            if final:
+                if proven(options["timeout_ms"]):
+                    return
+            else:
+                marker.wait_for(state="visible", timeout=options["timeout_ms"])
+    except RunInterrupted:
+        raise
+    except Exception as e:
+        if not reserved:
+            raise  # Preparation failed before any submission was reserved.
+        # Never retry an uncertain phase, including a locator or DB error.
+        logger.warning("Login submission has no success proof (%s)", type(e).__name__)
+    if settle_attempt(ctx.db, ctx.task["id"], ctx.run_id):
+        raise StepAbortError("Login attempt limit reached; task blocked")
+    while True:
+        outcome = pause_loop(
+            ctx, "login_failed",
+            "Login not proven. Complete it manually, then resume to verify. "
+            "Resume never submits again. Manual submissions are not counted.",
+            None, "login_not_proven", step["step"])
+        if outcome != "resume":
+            raise PauseOutcomeAbort(outcome)
+        if proven(options["timeout_ms"]):
+            return
 
 
 def _handle_download_with_pause(ctx, step):
@@ -738,7 +947,7 @@ def _run_recipe(ctx, recipe):
         except RunInterrupted:
             raise  # a shutdown signal is not a launch failure to abort on
         except Exception as e:
-            logger.exception(f"Browser launch failed: {e}")
+            logger.error("Browser launch failed: %s", failure_record("launch_persistent_context", e))
             return files_downloaded, True, None
         try:
             services = recipe.get("services", [])
@@ -746,6 +955,9 @@ def _run_recipe(ctx, recipe):
                 service_name = service.get("serviceName")
                 logger.info(f"Processing Service: {service_name} for {ctx.bcs.usr}.")
                 for step in sorted(service.get("steps", []), key=lambda x: x.get("step", 0)):
+                    if is_login(step):
+                        _execute_login(ctx, step)
+                        continue
                     wait_method = _wait_user_method(step)
                     if wait_method is not None:
                         # C5.5: a wait_user step pauses before execution and
@@ -765,9 +977,9 @@ def _run_recipe(ctx, recipe):
             logger.error(f"Run aborted: {e}")
         except RunInterrupted:
             raise  # a shutdown signal ends the run interrupted, not failed
-        except Exception:
+        except Exception as e:
             aborted = True
-            logger.exception("EXCEPTION in _run_recipe(): run aborted")
+            logger.error("Unexpected recipe error: run aborted: %s", failure_record("run_recipe", e))
         finally:
             for closer in (ctx.page.close, ctx.context.close):
                 try:
@@ -781,6 +993,25 @@ def _run_recipe(ctx, recipe):
 
 
 def run_task(task_id: int, debug: bool = False) -> int:
+    """Serialize all runner entries, including direct CLI invocations.
+
+    A process-held lock survives neither crash nor SIGKILL, and must never be
+    unlinked (a new inode could allow another runner to pass the same lock).
+    """
+    config.load_env()
+    config.ensure_dirs()
+    lock_dir = config.DATA_DIR / "task-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    with (lock_dir / f"task-{int(task_id)}.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("runner: task already has an active runner", file=sys.stderr)
+            return 1
+        return _run_task(task_id, debug)
+
+
+def _run_task(task_id: int, debug: bool = False) -> int:
     """Execute one task run (sync Playwright step loop).
 
     Returns the process exit code: 0 on success, 1 on a run failure
@@ -796,10 +1027,19 @@ def run_task(task_id: int, debug: bool = False) -> int:
             print(f"runner: task {task_id} not found", file=sys.stderr)
             return 1
 
+        if task["login_locked"] or task["login_pending_run_id"] is not None:
+            print("runner: task login is blocked or unresolved; no run started", file=sys.stderr)
+            return 1
+
         recipe_file = task["recipe_file"] or str(config.recipe_path_for(task["service"]))
         recipe = CheckRecipe(recipe_file, str(config.RECIPE_SCHEMA))
         if recipe is None:
             print(f"runner: recipe {recipe_file} not found or invalid", file=sys.stderr)
+            return 1
+        try:
+            validate_login_recipe(recipe)
+        except ValueError as e:
+            print(f"runner: invalid login contract: {e}", file=sys.stderr)
             return 1
 
         # C6: the runner owns the per-run display: claim a display from the
@@ -815,7 +1055,13 @@ def run_task(task_id: int, debug: bool = False) -> int:
 
         result = "failure"
         files = []
-        api_url = config.env("BW_API_URL")
+        # The effective vault API values (Settings win over env) are exported
+        # into the process environment before any vault call, so the vault
+        # transport's BW_API_HOST read and the run context's TOTP re-fetch
+        # both see them; empty values keep the legacy env-only behavior.
+        api_url, api_host = config.vault_settings(db)
+        os.environ["BW_API_URL"] = api_url
+        os.environ["BW_API_HOST"] = api_host
         children = None
         run_id = None
         try:
@@ -828,10 +1074,11 @@ def run_task(task_id: int, debug: bool = False) -> int:
             run_id = db.create_run(task_id, pid=os.getpid(),
                                    display=display_number,
                                    novnc_port=websockify_port)
+            db.set_task_status(task_id, "running")
             try:
                 children = _start_display_stack(db, run_id, display_number)
                 os.environ["DISPLAY"] = f":{display_number}"
-                credentials = _vault_preflight(task)
+                credentials = _vault_preflight(task, db)
                 ctx = _RunContext(task, run_id, db, debug, credentials, api_url)
                 files, aborted, pause_outcome = _run_recipe(ctx, recipe)
                 result = run_result(aborted, files, pause_outcome)
@@ -852,8 +1099,9 @@ def run_task(task_id: int, debug: bool = False) -> int:
                 # failure.
                 print(f"runner: display stack failed for task {task_id}: {e}",
                       file=sys.stderr)
-            except Exception:
-                logger.exception(f"Task {task_id} run {run_id} aborted by an unexpected error")
+            except Exception as e:
+                logger.error("Task %s run %s aborted by an unexpected error: %s",
+                             task_id, run_id, failure_record("run_task", e))
             finally:
                 # The display stack is reaped and the row finalized with
                 # the run, so a finished run never leaks the stack or
@@ -864,11 +1112,12 @@ def run_task(task_id: int, debug: bool = False) -> int:
                 # the vault preflight or an unexpected error stopped the
                 # run before the step loop ran.
                 db.update_run(run_id, result=result, ended_at=now())
+                settle_attempt(db, task_id, run_id)
                 # A finished run releases the task: the 'waiting' status
                 # set by a pause is terminal here (resume, cancel and
                 # timeout all end the run), so the task goes back to idle
                 # and the scheduler's row lock can claim it again.
-                db.set_task_status(task_id, "idle")
+                db.release_task_run(task_id)
         finally:
             # The claim is released with the run, so a finished (or
             # interrupted) run never leaks a display - even when the

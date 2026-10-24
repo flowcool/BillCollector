@@ -45,9 +45,75 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ntfy push notifications for pause events (`ntfy_topic` setting; `NTFY_HOST`
   environment variable, default `https://ntfy.sh`).
 - `python3 -m billcollector run <task_id>`: execute a single task run from the
-  command line (e.g., from cron) without the daemon.
+  command line (e.g., from cron) without the daemon. The run executes on an
+  allocated Xvfb display (viewable over noVNC on the run's websockify port);
+  `--debug` adds a press-Enter pause before every step (the F5 debug
+  workflow).
 - Pytest suite covering the daemon modules and the UI pages (dev-only, not
   part of the docker image) and a ruff lint setup for the maintained source.
+- First-start onboarding wizard (`/onboarding`): a three-step stepper - the
+  vault API URL (+ optional host) with a **Check** button (the same DNS
+  vetting + status check the run preflight makes) and **Save** (new Settings
+  keys `vault_api_url` / `vault_api_host`; empty allowed = environment
+  fallback; skipping is allowed but flagged), the task list (per-task enable
+  toggles, an **Import from INI** button that adds only the (service, user)
+  pairs missing from the Task table - including ones the user deleted - and a
+  manual **New task** form), and a **Finish** step. While active, every
+  authenticated page redirects to it; upgraded installs (a password hash
+  exists and at least one task is enabled) are auto-completed on daemon start.
+- Docker Compose stack (`docker-compose.yml`) for the daemon: builds from the
+  root `Dockerfile`, UI port `${BC_UI_PORT:-8766}`, the per-run noVNC live
+  view (websockify range `6080-6095`), `host.docker.internal:host-gateway` to
+  reach host-local services, and an optional self-hosted ntfy behind the
+  `ntfy` compose profile.
+- Vault API configuration in the UI: new Settings fields `vault_api_url` /
+  `vault_api_host` (settings page and the wizard's vault step); a non-empty
+  Settings value wins over the `BW_API_URL` / `BW_API_HOST` environment, so a
+  wrong vault URL can be fixed from the browser even with a read-only
+  `apps/.env` mount (the runner exports the effective values into the
+  environment before the vault calls; empty values keep the legacy env-only
+  behavior).
+- Phased login protection for task runs (issue #20, contract in
+  [doc/SAFE_LOGIN.md](doc/SAFE_LOGIN.md)): a new recipe method `login` with an
+  explicit success locator and, for multi-factor portals, ordered `phases`
+  (each `steps` + `submit` + `success`; the last phase must prove the final
+  success locator). The runner skips the block when the success locator is
+  already visible (a live session), reserves one attempt of a persistent
+  failure budget before the first submission, submits each phase exactly
+  once, and consumes the reserved attempt without retry when a submission's
+  outcome is uncertain.
+- Persistent login failure budget per task (additive Task columns
+  `login_failures`, `login_failure_limit`, `login_locked`,
+  `login_cycle_active`, `login_pending_run_id`; existing databases are
+  migrated in place). Reaching the limit (default 2, configurable per task
+  and per recipe) locks the task: scheduled, manual and CLI runs are refused
+  until an explicit clear, a crash or restart settles an in-flight attempt
+  (the orphan cleanup consumes it), and a successful session proof resets the
+  budget.
+- Login state in the Web UI: a Login column on the dashboard (available /
+  pending / blocked; the bulk run skips blocked tasks and Run now is
+  disabled while blocked), the budget state on the task detail page
+  (unproven attempts / limit), and a "Clear login block" button (idle +
+  locked only, confirm dialog) that grants exactly one further attempt while
+  preserving the profile and schedule.
+- An ntfy notification when a task's login is locked (existing `ntfy_topic`
+  transport; task id and failure count, a deep link to the task detail when
+  the UI base URL is set).
+- Bounded Playwright collection actions (issue #18): two new terminal
+  recipe methods that take one page locator plus one options object -
+  `click_until_absent` drives a cumulative "load more" control until it is
+  absent or hidden (every click must increase the visible progress count;
+  `max_clicks` 1-100, `timeout_ms` 1-120000; page-replacement pagination and
+  virtualized lists fail closed), and `download_all` downloads every item of
+  a stable ordered list (non-empty unique `key_attribute` per item, exactly
+  one download per click observed over a full per-item `event_window_ms`
+  window, `max_items` 1-200, `timeout_ms` 1-600000, with the per-item event
+  budget re-validated against the deadline before every click). Collection
+  steps are single-attempt (no automatic retry after partial side effects),
+  cannot be nested under `expect_download` or marked `graceful: true`, and
+  an operator resume of `download_all` skips the item keys already persisted
+  for the step; a suggested filename already saved earlier in the run fails
+  instead of being overwritten.
 
 ### Changed
 
@@ -67,7 +133,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   mount targets are no longer hardcoded: `CONSUMER_DIR`/`DB_DIR` are read from
   the environment or a `.env` file next to the script (validated before the
   build), and `SKIP_MOUNT_SETUP=1` skips the mount step for local image
-   builds. `deploy_remote.sh` forwards the two variables to the NAS.
+   builds. `deploy_remote.sh` forwards the two variables to the NAS. It also
+  creates and chowns the daemon compose bind paths (`apps/data`,
+  `apps/browser/profiles`) so the first `docker compose up` does not create
+  them root-owned and the non-root daemon cannot write into them.
 - The shared foundation (database, vault client, page-state recording,
   downloads, notifications, control protocol) was extracted into the
   `apps/billcollector/` package, which the batch entry points
@@ -75,6 +144,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cron-driven batch path is unchanged.
 - The single-service manual run UI (`apps/bc_ui.py`, added in v0.3) is
   replaced by the daemon web UI.
+- README restructured around the daemon as the primary Quick Start (clone,
+  `apps/.env`, `docker compose up -d --build`, set the password, walk the
+  wizard, first task); new sections for daemon mode (env vars, container
+  semantics), UI usage per page, cron-to-daemon migration, and the F5 debug
+  workflow; the legacy batch section is now marked deprecated.
+- Concurrent executions of one task are now refused by a per-task file lock
+  held for the duration of the run (`task-locks/` under the data dir, never
+  unlinked): a second CLI or daemon start of the same task stops before
+  touching the recipe, the vault, or a display. Task claiming is guarded in
+  the database (locked or pending login tasks are refused, and a rejected
+  contender cannot release a task another active run still owns).
+
+### Deprecated
+
+- The cron-driven batch mode (`BillCollector.sh` + cron, a headless
+  `docker run` per cron tick) is superseded by the daemon (per-task
+  scheduling, live supervision, pause-and-step-in) and marked deprecated in
+  the README. The wrapper keeps working as the rollback path (its flock and
+  `docker run` behavior is unchanged); it now prints a deprecation notice to
+  stderr on every start.
 
 ### Removed
 
@@ -103,6 +192,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Update fork runtime pins to aiohttp 3.14.4 and certifi 2026.10.19 for
   the published security advisories affecting the prior pins.
+- Keep residual daemon exception messages and tracebacks out of per-run logs
+  and SQLite notes. Retain fixed method/category diagnostics for scan, OTP,
+  screenshot, browser-launch and unexpected runner failures.
 
 - Pinned `tzdata` in `apps/requirements.txt` so the Python dependency check in
   the image build passes.
