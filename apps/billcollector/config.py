@@ -105,7 +105,7 @@ def chromium_args() -> list[str]:
     args = os.environ.get("BC_CHROMIUM_ARGS", "").split()
     forbidden = {"--no-sandbox", "--disable-setuid-sandbox",
                  "--disable-seccomp-filter-sandbox", "--disable-namespace-sandbox",
-                 "--single-process", "--in-process-gpu"}
+                 "--disable-gpu-sandbox", "--single-process", "--in-process-gpu"}
     if any(arg.split("=", 1)[0] in forbidden for arg in args):
         raise ValueError("BC_CHROMIUM_ARGS must not disable Chromium sandbox isolation")
     return args

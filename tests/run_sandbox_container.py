@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 # Fixed executable/argument vectors; no shell or credentials.
 import subprocess  # nosec B404
+import sys
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,24 +103,32 @@ def main():
             (args.output / f"{stream}.log").write_text(value)
         raise RuntimeError("Container check timed out; inspect retained logs") from None
     finally:
-        if identifier:
-            details = json.loads(run(["inspect", identifier]).stdout)[0]
-            if not (details['Id'] == identifier and details['Config']['Labels']['sandbox.owner'] == name):
-                raise RuntimeError('Synthetic check failed')
-            receipt["exit_code"] = details["State"]["ExitCode"]
-            if details["State"]["Running"]:
-                run(["stop", "--time", "5", identifier])
-            # The label/ID check confines removal to this invocation and its anonymous volume.
-            run(["rm", "--volumes", identifier])
-            receipt["cleanup_verified"] = not run([
-                "ps", "-a", "--filter", f"name=^/{name}$", "--format", "{{.ID}}"]).stdout.strip()
-            receipt["volumes_removed"] = all(volume not in run([
-                "volume", "ls", "--filter", f"name={volume}", "--format", "{{.Name}}"
-            ]).stdout.splitlines() for volume in volumes)
-            receipt["cleanup_verified"] = receipt["cleanup_verified"] and receipt["volumes_removed"]
-        (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-        if not (receipt['cleanup_verified']):
-            raise RuntimeError('Owned cleanup was not verified')
+        primary_error = sys.exception()
+        cleanup_error = None
+        try:
+            if identifier:
+                details = json.loads(run(["inspect", identifier]).stdout)[0]
+                if not (details['Id'] == identifier and details['Config']['Labels']['sandbox.owner'] == name):
+                    raise RuntimeError('Synthetic check failed')
+                receipt["exit_code"] = details["State"]["ExitCode"]
+                if details["State"]["Running"]:
+                    run(["stop", "--time", "5", identifier])
+                # The label/ID check confines removal to this invocation and its anonymous volume.
+                run(["rm", "--volumes", identifier])
+                receipt["cleanup_verified"] = not run([
+                    "ps", "-a", "--filter", f"name=^/{name}$", "--format", "{{.ID}}"]).stdout.strip()
+                receipt["volumes_removed"] = all(volume not in run([
+                    "volume", "ls", "--filter", f"name={volume}", "--format", "{{.Name}}"
+                ]).stdout.splitlines() for volume in volumes)
+                receipt["cleanup_verified"] = receipt["cleanup_verified"] and receipt["volumes_removed"]
+        except Exception as error:
+            cleanup_error = error
+            receipt["cleanup_verified"] = False
+            receipt["cleanup_error"] = type(error).__name__
+        finally:
+            (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        if not receipt["cleanup_verified"] and primary_error is None:
+            raise RuntimeError("Owned cleanup was not verified; inspect receipt.json") from cleanup_error
 
 
 if __name__ == "__main__":

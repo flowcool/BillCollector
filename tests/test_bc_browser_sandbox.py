@@ -21,6 +21,7 @@ def test_daemon_requests_sandbox_on_persistent_browser(tmp_path, monkeypatch):
 @pytest.mark.parametrize("argument", [
     "--no-sandbox", "--no-sandbox=true", "--disable-setuid-sandbox",
     "--disable-seccomp-filter-sandbox", "--disable-namespace-sandbox",
+    "--disable-gpu-sandbox", "--disable-gpu-sandbox=true",
     "--single-process", "--in-process-gpu",
 ])
 def test_disabling_sandbox_is_rejected_before_launch(tmp_path, monkeypatch, argument):

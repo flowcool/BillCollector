@@ -10,7 +10,7 @@ There is no automatic fallback and no environment switch to disable protection.
 
 `BC_CHROMIUM_ARGS` still supports ordinary launch workarounds. It rejects
 `--no-sandbox`, `--disable-setuid-sandbox`, `--disable-seccomp-filter-sandbox`,
-`--disable-namespace-sandbox`, `--single-process` and `--in-process-gpu`,
+`--disable-namespace-sandbox`, `--disable-gpu-sandbox`, `--single-process` and `--in-process-gpu`,
 including `=value` forms. These switches conflict with the isolation requirement.
 This denylist is not a complete validator for all Chromium command-line options.
 Only trusted operators must control this environment variable.
