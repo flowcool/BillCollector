@@ -1,0 +1,58 @@
+name: Sandbox candidate
+
+# Fork-only proof for this upstream-snapshot analysis candidate.
+on:
+  pull_request:
+    branches: [analysis/upstream-main-42d4337]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    if: github.repository == 'flowcool/BillCollector'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/apps/browser
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            apps/requirements.txt
+            apps/requirements-dev.txt
+      - run: python -m pip install -r apps/requirements.txt -r apps/requirements-dev.txt bandit==1.9.4
+      - run: python -m pip check
+      - run: python -m compileall -q apps tests
+      - run: ruff check apps tests
+      - run: bandit -q tests/check_chromium_sandbox.py tests/run_sandbox_container.py
+      - run: python -m playwright install --with-deps chromium
+      - run: LC_ALL=C python -m pytest tests/ -q
+      - name: Build the exact candidate image
+        run: docker build --label org.opencontainers.image.revision="$GITHUB_SHA" -t billcollector-sandbox:ci .
+      - name: Qualify actual application launches and renderer sandbox
+        run: >-
+          python tests/run_sandbox_container.py --image billcollector-sandbox:ci
+          --profile docker/chromium-seccomp.json --expect active --output tmp/sandbox-active
+      - name: Run existing isolated image, UI and mock-portal regression
+        run: >-
+          python tests/run_sandbox_container.py --image billcollector-sandbox:ci
+          --profile docker/chromium-seccomp.json --runtime-regression --output tmp/sandbox-regression
+      - name: Preserve synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sandbox-proof
+          path: tmp/sandbox-*
+          if-no-files-found: ignore
+          retention-days: 7
