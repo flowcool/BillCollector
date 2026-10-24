@@ -534,6 +534,7 @@ class Orchestrator:
                 updates["notes"] = (existing + "\n" if existing else "") + notes_tail
         if updates:
             self._db.update_run(run_id, **updates)
-        self._db.release_task_run(task_id)
+        if row["result"] is None:
+            self._db.release_task_run(task_id)
         logger.info("runner for task %s (run %s) exited with code %s",
                     task_id, run_id, exit_code)

@@ -719,7 +719,7 @@ services:
         def partial_download(_page, _context, _locator, save, _options):
             save(SimpleNamespace(
                 suggested_filename="one.pdf",
-                url="https://example.test/one.pdf",
+                url="https://user:private@example.test/one.pdf;token=private?token=private#private",
                 save_as=lambda _path: None,
             ))
             raise CollectionError("second item failed")
@@ -749,6 +749,7 @@ services:
         self.assertEqual(files, [])
         self.assertEqual(finalized[0]["result"], "failure")
         self.assertIn("one.pdf", finalized[0]["download_info"])
+        self.assertNotIn("private", finalized[0]["download_info"])
 
     def test_collection_step_does_not_use_generic_automatic_retry(self):
         ctx = SimpleNamespace(bcs=object(), debug=False)
@@ -924,7 +925,8 @@ class BrowserCollectionTests(unittest.TestCase):
                 self.send_response(200)
                 self.send_header("Content-Type", mime)
                 if mime == "application/pdf":
-                    name = self.path.strip("/")
+                    name = {"/one.pdf": "one.pdf", "/2.pdf": "2.pdf",
+                            "/3.pdf": "3.pdf"}[self.path]
                     self.send_header(
                         "Content-Disposition", f"attachment; filename={name}"
                     )

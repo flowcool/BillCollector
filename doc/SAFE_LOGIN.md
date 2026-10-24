@@ -108,7 +108,8 @@ The implementation follows six steps:
    The runner sends synchronously. An empty UI base URL omits the task link.
 6. **Acceptance**: execute isolated tests, browser fixtures and historical
    regression; inspect the semantic diff and pinned static checks; commit locally.
-   Upstream publication requires the issue #20 agreement and a fresh baseline.
+   Upstream publication requires a fresh baseline and verification against the
+   interface agreed in issue #20.
 
 ## Requirement-to-proof map
 
@@ -153,7 +154,7 @@ This supports explicit ordered phases and requires a reliable, portal-specific
 success locator. Preparation fills must not trigger implicit submission. A stale
 or incorrect success locator cannot establish real authentication: recipe authors
 must verify that proof. Arbitrary manual VNC/browser submissions are not counted.
-The candidate phased contract still requires upstream agreement. The UI
+The phased recipe and database contract was agreed in issue #20 (2026-10-22). The UI
 notification is best-effort, and a stopped older binary does not enforce the new
 block fields. These are explicit contract limits, not claims of provider lockout
 immunity.

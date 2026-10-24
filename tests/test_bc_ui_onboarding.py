@@ -407,6 +407,45 @@ async def test_task_toggle_updates_enabled_and_syncs(user, onboarding,
     assert user.notify.contains("Task onb-tog / u1 enabled")
 
 
+async def test_task_switches_are_independent(user, onboarding, testdb, monkeypatch):
+    synced = []
+    monkeypatch.setattr(TaskScheduler, "sync_task",
+                        lambda self, task_id: synced.append(task_id))
+    first = testdb.create_task("onb-first", "u1", enabled=False)
+    second = testdb.create_task("onb-second", "u2", enabled=False)
+    await _login(user, testdb)
+    await user.open("/onboarding")
+    (first_toggle,) = user.find(marker=f"onb-toggle-{first}").elements
+    (second_toggle,) = user.find(marker=f"onb-toggle-{second}").elements
+    first_toggle.value = True
+    assert testdb.get_task(first)["enabled"] == 1
+    assert testdb.get_task(second)["enabled"] == 0
+    second_toggle.value = True
+    first_toggle.value = False
+    assert testdb.get_task(first)["enabled"] == 0
+    assert testdb.get_task(second)["enabled"] == 1
+    assert synced == [first, second, first]
+
+
+async def test_finish_summary_refreshes_after_changes_and_header_navigation(
+        user, onboarding, testdb, monkeypatch):
+    monkeypatch.delenv("BW_API_URL", raising=False)
+    await _login(user, testdb)
+    await user.open("/onboarding")
+    (summary,) = user.find(marker="onb-summary").elements
+    assert "0 task(s)" in summary.text
+    testdb.create_task("onb-summary-missing", "u1", enabled=True)
+    testdb.set_setting("vault_api_url", VAULT_URL)
+    user.find(marker="onb-continue-tasks").click()
+    assert "1 task(s), 1 enabled, 1 with a missing recipe file" in summary.text
+    assert VAULT_URL in summary.text
+    stepper = next(iter(user.find(kind=ui.stepper).elements))
+    stepper.value = "Tasks"
+    testdb.create_task("onb-summary-second", "u2", enabled=False)
+    stepper.value = "Finish"
+    assert "2 task(s), 1 enabled, 2 with a missing recipe file" in summary.text
+
+
 # ---- decision 2, step 3: finish ---------------------------------------------
 
 async def test_finish_writes_the_completed_flag(user, onboarding, testdb):

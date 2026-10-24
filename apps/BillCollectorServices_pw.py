@@ -247,7 +247,7 @@ def perform_actions(bcs):
                             filepath = os.path.join(DOWNLOAD_DIR, filename)
                             download.save_as(filepath)
                             entry = {
-                                "url": str(download.url),
+                                "url": sanitize_url(str(download.url)),
                                 "suggested_filename": filename,
                                 "result": "success",
                             }

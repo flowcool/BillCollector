@@ -194,6 +194,8 @@ Now that we have done a good job installing all the prerequisites, we are focusi
 
 7. Walk the **onboarding wizard**: check and save your vault API URL (or skip it and fix it later in Settings), review the tasks imported from your INI file (or add a new task), enable the tasks the daemon should run on schedule, and finish.
 
+   Configure the authenticated [noVNC reverse proxy](doc/novnc-reverse-proxy.md) before using the live browser view. The default Compose stack does not publish browser ports.
+
 8. Collect your first document: on the **Dashboard** press **Run now** for an enabled task - watch the run live (session page, noVNC tab) until it reaches `success`; the document appears on the Downloads page and in the consumer folder. Every step is driven from the browser, no shell access to the daemon needed.
 
 ### Optional: Self-Hosted ntfy
@@ -228,7 +230,7 @@ The vault API can also be configured from the UI (the onboarding wizard's vault 
 From the compose file (`docker-compose.yml`):
 
 - **UI port** `${BC_UI_PORT:-8766}:8000` - the daemon UI.
-- **noVNC live view** websockify ports `6080-6095` - one port per allocated Xvfb display (websockify port = `6080 + (display - display_start)`); the range matches the default Settings `display_start=99` / `display_count=16` - change them together if you change the display range.
+- **noVNC live view** uses an authenticated reverse proxy on the UI origin. Websockify ports are not published. See [Same-origin noVNC routing](doc/novnc-reverse-proxy.md) for `BC_NOVNC_PATH` and the single-display settings.
 - **Volumes**: `./apps/.env` (read-only), `./apps/Downloads`, `./apps/db`, `./apps/data`, `./apps/browser/profiles` (profiles only - mounting all of `apps/browser` would hide the Chromium build installed in the image).
 - **`host.docker.internal:host-gateway`** - reach host-local services (Vaultwarden, `bw serve`, the mock portal) from the container as `http://host.docker.internal:<port>`. Vaultwarden itself stays a prerequisite in its own compose stack.
 - `restart: unless-stopped`, `init: true`, a health check on `/_alive`, and the non-root user from the `APP_UID`/`APP_GID` build args.
@@ -375,7 +377,7 @@ services:
 You are running BillCollector with cron (`BillCollector.sh` in the crontab) and want to move to the daemon:
 
 1. **Import the tasks.** Your INI file is already known to the daemon: on its first start the `[Playwright]` sections of `bc_default.ini`/`bc_test.ini` are imported as tasks (each (service, user) pair, initially disabled with a default monthly cron). If the daemon already started, press **Import from INI** in the onboarding wizard, or add a task from the dashboard **Add task** dialog.
-2. **Set the schedules.** Open each task's **Edit** dialog on the Dashboard, set its cron (a 5-field crontab expression, e.g., `0 6 1 1,15 * *` for the 1st and 15th at 06:00), and enable it.
+2. **Set the schedules.** Open each task's **Edit** dialog on the Dashboard, set its cron (a 5-field crontab expression, e.g., `0 6 1,15 * *` for the 1st and 15th at 06:00), and enable it.
 3. **Verify one run.** Press **Run now** for the task, watch the session page until the run reaches `success`, and check the document on the Downloads page and in the consumer folder.
 4. **Stop the cron entry.** Comment out or delete the crontab line that calls `BillCollector.sh`. **Rollback = re-enable the cron entry**: the legacy path keeps working unchanged.
 

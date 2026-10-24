@@ -206,7 +206,7 @@ def register_onboarding(db: Database, scheduler: TaskScheduler) -> None:
                                     value=bool(task["enabled"])) \
                                     .mark(f"onb-toggle-{task['id']}")
 
-                                def on_toggle(_e=None, task_id=task["id"]) \
+                                def on_toggle(_e=None, task_id=task["id"], toggle=toggle) \
                                         -> None:
                                     task = db.get_task(task_id)
                                     if task is None:
@@ -309,19 +309,24 @@ def register_onboarding(db: Database, scheduler: TaskScheduler) -> None:
             with ui.step("Finish", "Finish"):
                 ui.label("Finish").classes("text-subtitle1")
 
-                tasks = db.list_tasks()
-                enabled = sum(1 for t in tasks if t["enabled"])
-                missing = sum(
-                    1 for t in tasks
-                    if not config.recipe_path_for(t["service"]).exists())
-                vault_state, _host = config.vault_settings(db)
-                vault_note = vault_state or (
-                    "not configured (runs will fail at the vault preflight)")
-                ui.label(
-                    f"{len(tasks)} task(s), {enabled} enabled, "
-                    f"{missing} with a missing recipe file. "
-                    f"Vault API URL: {vault_note}."
-                ).classes("text-sm").mark("onb-summary")
+                summary = ui.label().classes("text-sm").mark("onb-summary")
+
+                def refresh_summary() -> None:
+                    tasks = db.list_tasks()
+                    enabled = sum(1 for t in tasks if t["enabled"])
+                    missing = sum(
+                        1 for t in tasks
+                        if not config.recipe_path_for(t["service"]).exists())
+                    vault_state, _host = config.vault_settings(db)
+                    vault_note = vault_state or (
+                        "not configured (runs will fail at the vault preflight)")
+                    summary.set_text(
+                        f"{len(tasks)} task(s), {enabled} enabled, "
+                        f"{missing} with a missing recipe file. "
+                        f"Vault API URL: {vault_note}.")
+
+                refresh_summary()
+                stepper.on_value_change(lambda _e: refresh_summary())
                 ui.label(
                     "After finishing you can change everything in "
                     "Settings (the ntfy topic, the deep-link base URL, the "

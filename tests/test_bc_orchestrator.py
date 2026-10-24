@@ -250,6 +250,15 @@ class StartRunTests(OrchestratorTestBase):
         # is C7.4's startup orphan cleanup).
         self.assertEqual(self.db.get_task(task_id)["status"], "idle")
 
+    def test_finished_monitor_preserves_new_claim_before_next_run_row(self):
+        task_id = self.db.create_task("svc", "u1", enabled=True)
+        run_id = self.db.create_run(task_id, pid=424242)
+        self.db.update_run(run_id, result="success", ended_at="2026-10-24 10:00:00")
+        self.assertTrue(self.db.claim_task_run(task_id))
+        self.orch._finalize_run(task_id, 424242, 0, [])
+        self.assertEqual(self.db.get_task(task_id)["status"], "running")
+        self.assertFalse(self.db.claim_task_run(task_id))
+
     def test_early_runner_failure_releases_the_claim(self):
         task_id = self.db.create_task("svc", "u1", enabled=True)
         exit_code = self._run_to_exit(self._orch(mode="earlyfail"), task_id)
