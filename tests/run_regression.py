@@ -13,6 +13,10 @@ against the expectations in tests/scenarios.py:
 - skip-and-continue: every pair produced its own new Service run row
 - BillCollector exit semantics (1 if any pair failed, else 0)
 
+Without --vault, the local mock uses zero DOM settling, a 2 s action
+timeout and a 5 s navigation timeout. DOM capture and scenario checks still
+run. Runtime defaults and the optional --vault path keep their timing.
+
 Usage (from the repo root):
     apps/.venv/bin/python tests/run_regression.py --ini tests/bc_regression.ini
         [--keep-downloads] [--port 8787] [--vault]
@@ -28,6 +32,7 @@ Exit codes:
 
 import argparse
 import configparser
+from contextlib import contextmanager
 import fcntl
 import json
 import os
@@ -37,6 +42,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APPS_DIR = os.path.join(REPO_ROOT, "apps")
@@ -55,6 +61,29 @@ from tests.scenarios import (  # noqa: E402
     site_url,
 )
 from BillCollectorServices_pw import retrieve_from_service_with_playwright  # noqa: E402
+import BillCollectorServices_pw as batch  # noqa: E402
+from billcollector import pagestate  # noqa: E402
+
+
+@contextmanager
+def synthetic_browser_timing(enabled=True):
+    """Bound waits for the local mock only; leave --vault timing unchanged."""
+    if not enabled:
+        yield
+        return
+
+    initialize = batch.InitBrowser
+
+    def initialize_synthetic_browser(playwright, service):
+        context = initialize(playwright, service)
+        if context is not None:
+            context.set_default_timeout(2000)
+            context.set_default_navigation_timeout(5000)
+        return context
+
+    with (mock.patch.object(pagestate, "DOM_SETTLE_MS", 0),
+          mock.patch.object(batch, "InitBrowser", initialize_synthetic_browser)):
+        yield
 
 
 def python_for_mock():
@@ -358,8 +387,9 @@ def main():
             expected_run_number = run_snap.get(service, 0) + run_count[service]
             t0 = time.time()
             creds = vault_creds(vault_api, service, user) if vault_api else None
-            actual, problems = check_pair(service, user, args.port,
-                                          expected, expected_run_number, creds)
+            with synthetic_browser_timing(enabled=not args.vault):
+                actual, problems = check_pair(service, user, args.port,
+                                              expected, expected_run_number, creds)
             ok = not problems
             results.append((service, user, expected, actual, ok, problems))
             status = "OK  " if ok else "FAIL"

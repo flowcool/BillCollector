@@ -45,6 +45,14 @@ atexit.register(shutil.rmtree, _TEST_ROOT, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
+def synthetic_dom_settling(monkeypatch):
+    """Local fixtures use Playwright readiness checks instead of a fixed wait."""
+    from billcollector import pagestate
+
+    monkeypatch.setattr(pagestate, "DOM_SETTLE_MS", 0)
+
+
+@pytest.fixture(autouse=True)
 def isolate_test_transports_and_signals(monkeypatch):
     """Permit local fixtures only; keep runner signal handlers inside one test.
 

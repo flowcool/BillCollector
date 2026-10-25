@@ -21,6 +21,10 @@ from .redaction import sanitize_url
 
 logger = logging.getLogger(__name__)
 
+# Real portals keep the existing settling window. Isolated synthetic tests
+# override this budget without skipping the DOM scan or changing recipes.
+DOM_SETTLE_MS = 3000
+
 
 class PageState:
     """Represents the state of a page at a given time."""
@@ -89,14 +93,14 @@ class PageState:
 
         # Use a MutationObserver to allow dynamic injection to occur.
         js_observer = r'''async () => {
-            const observerTime = 3000; // wait for 3 seconds
+            const observerTime = %d;
             await new Promise(resolve => {
                 const observer = new MutationObserver(() => {});
                 observer.observe(document.body, { childList: true, subtree: true });
                 setTimeout(() => { observer.disconnect(); resolve(); }, observerTime);
             });
             return true;
-        }'''
+        }''' % DOM_SETTLE_MS
         # Run the observer safely to ensure the DOM is stable.
         if not safe_evaluate(page, js_observer):
             return None
