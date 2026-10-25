@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, playwright-next]
   push:
-    branches: [main, playwright-next]
+    branches: [main, playwright-next, "integration/**"]
     tags: ["v*", "playwright-v*"]
   schedule:
     - cron: "41 6 * * 2"
