@@ -12,8 +12,9 @@ Design constraints:
 - Strict-JSON output contract (``fix_type`` step/recipe/none).
 - Every proposal passes the existing ``validate_recipe`` gate before
   it is shown or written.
-- The recipe file is only touched with ``--apply`` (the
-  human-approval gate); the default is a dry-run diff on stdout.
+- Applying requires ``--apply`` with a reviewed ``--llm-response`` file.
+  Live LLM replies only produce a diff or a proposal file; portal text is
+  untrusted and can influence the proposal.
 - Dev-side only: no daemon import, no protocol change, the daemon is
   unaffected when the LLM endpoint is down or missing.
 """
@@ -374,6 +375,11 @@ def run_doctor(service, pause=None, from_run=None, db=None,
     0 fix produced (applied with --apply); 1 the LLM says no in-place
     fix exists; 2 usage / LLM / parse / validation error; 3 recipe or
     pause-context load error."""
+    if apply and not llm_response:
+        print("doctor: --apply requires a reviewed --llm-response file; "
+              "use a dry run or --out for live LLM proposals")
+        return 2
+
     path = config.recipe_path_for(service)
     ok, error, recipe_text, recipe_data = recipes.load_recipe(path)
     if not ok:
@@ -416,7 +422,7 @@ def run_doctor(service, pause=None, from_run=None, db=None,
         return 2
 
     fix_type = fix.get("fix_type")
-    print(f"doctor: {fix.get('explanation', '').strip()}")
+    print(f"doctor: {str(fix.get('explanation') or '').strip()}")
     if fix.get("confidence"):
         print(f"doctor: confidence: {fix['confidence']}")
 

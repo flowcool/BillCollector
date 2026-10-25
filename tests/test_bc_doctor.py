@@ -293,6 +293,39 @@ def test_run_doctor_apply(tmp_path, monkeypatch, capsys):
     assert ok, error
 
 
+def test_run_doctor_refuses_live_apply(tmp_path, monkeypatch, capsys):
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    recipe = recipe_dir / "recipe-pw__buhl.yaml"
+    recipe.write_text(BUHL_TEXT)
+    monkeypatch.setattr(config, "RECIPE_DIR", recipe_dir)
+
+    def unexpected_call(*args, **kwargs):
+        pytest.fail("Live LLM must not be called when applying a proposal")
+
+    monkeypatch.setattr(doctor, "call_llm", unexpected_call)
+    rc = doctor.run_doctor("buhl", pause=str(_pause_file(tmp_path)),
+                           llm_url="http://127.0.0.1:9999/v1",
+                           llm_model="synthetic", apply=True)
+    assert rc == 2
+    assert "reviewed --llm-response" in capsys.readouterr().out
+    assert recipe.read_text() == BUHL_TEXT
+
+
+def test_run_doctor_null_explanation(tmp_path, monkeypatch, capsys):
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    recipe = recipe_dir / "recipe-pw__buhl.yaml"
+    recipe.write_text(BUHL_TEXT)
+    monkeypatch.setattr(config, "RECIPE_DIR", recipe_dir)
+    fix = dict(BUHL_FIX, explanation=None)
+    rc = doctor.run_doctor("buhl", pause=str(_pause_file(tmp_path)),
+                           llm_response=str(_canned(tmp_path, fix)))
+    assert rc == 0
+    assert "dry run" in capsys.readouterr().out
+    assert recipe.read_text() == BUHL_TEXT
+
+
 def test_run_doctor_out_file(tmp_path, monkeypatch):
     recipe_dir = tmp_path / "recipes"
     recipe_dir.mkdir()

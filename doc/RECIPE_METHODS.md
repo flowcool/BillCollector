@@ -64,7 +64,7 @@ object (`getattr(previous_result, method_name)`):
 - a non-callable attribute is read as a property (no arguments allowed).
 
 Therefore the supported Playwright surface is the **public API of the
-pinned Playwright version** (`playwright==1.63.0`, `apps/requirements.txt`)
+pinned Playwright version** (`playwright==1.64.0`, `apps/requirements.txt`)
 reachable through the chain that starts on a `Page`: the public
 methods and properties of `playwright.sync_api.Page`, and of every type
 a chain call can return - `Locator`, `Frame`, `FrameLocator` and
@@ -280,7 +280,7 @@ recipe.
 ## 6. Versioning and change control
 
 - The Playwright surface is pinned by `apps/requirements.txt`
-  (`playwright==1.63.0`); the introspected allowlist is only as valid as
+  (`playwright==1.64.0`); the introspected allowlist is only as valid as
   the pin. A pin bump is a contract change: re-derive the surface and
   re-run the compatibility baseline.
 - Adding a reserved method is a contract change: extend this document,

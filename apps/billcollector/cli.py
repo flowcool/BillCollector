@@ -62,8 +62,8 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="write the proposed YAML here instead of "
                                "printing (recipe file untouched)")
     p_doctor.add_argument("--apply", action="store_true",
-                          help="write the proposed YAML to the recipe "
-                               "file (validated, atomic)")
+                          help="apply a reviewed --llm-response file "
+                               "to the recipe (validated, atomic)")
     p_doctor.add_argument("--timeout", type=float, default=120,
                           help="LLM request timeout in seconds")
 
