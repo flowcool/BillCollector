@@ -11,6 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `billcollector doctor` proposes recipe repairs from a pause context.
+  Configure `BC_LLM_URL`, `BC_LLM_MODEL` and optional `BC_LLM_API_KEY`,
+  or use a saved `--llm-response`. Live replies only produce proposals.
+  Read a saved response before using it with `--apply`.
+- Pause notifications now default to an empty `ntfy_topic` (opt-in).
+  Operators who used the implicit `billcollector` topic must set their
+  topic in Settings. Existing stored topics remain active.
+
 - Self-hosted daemon with a NiceGUI web UI: `python3 -m billcollector serve`
   (binds `127.0.0.1:8000` by default; `--host`/`--port` or `BC_UI_HOST`
   override). On the first start it imports the `[Playwright]` sections of
@@ -36,8 +44,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pause subsystem: a non-graceful step that still fails after 3 attempts, a
   failed download, or an explicit `wait_user` recipe step pauses the run (the
   task shows `waiting`) instead of aborting - it stores a machine-readable
-  pause context on the run, pushes an ntfy notification with a deep link to
-  the session page, and waits until the operator resumes or cancels, or the
+  pause context on the run, pushes an ntfy notification (if a topic is
+  configured) with a deep link to the session page, and waits until the operator resumes or cancels, or the
   pause deadline passes (default 1800 s, configurable in Settings).
 - New recipe method `wait_user`: an explicit pause point with an optional
   `prompt` and an optional `until` locator (the pause completes when that
@@ -233,6 +241,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sanitized inner URL), and step failures record the step, method and a
   fixed failure category (download failures additionally log the exception
   type) instead of raw exception text.
+- README daemon-migration section: the example cron for the 1st and 15th
+  at 06:00 had six fields (`0 6 1 1,15 * *`) and was rejected by the
+  five-field parser used by the scheduler and the UI; corrected to
+  `0 6 1,15 * *` (issue #27, D08).
 
 ## [v0.4] - 2026-10-02
 
