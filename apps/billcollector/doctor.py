@@ -468,7 +468,10 @@ def run_doctor(service, pause=None, from_run=None, db=None,
         Path(out).write_text(new_text, encoding="utf-8")
         print(f"doctor: proposed recipe written to {out} "
               f"(recipe file untouched)")
-    else:
+    elif llm_response:
         print("doctor: dry run - recipe file untouched (use --apply to "
               f"write {path})")
+    else:
+        print("doctor: dry run - recipe file untouched (use --out to "
+              "save the proposal for review)")
     return 0
