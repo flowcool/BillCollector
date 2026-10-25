@@ -37,6 +37,11 @@ updates:
   - dependencies
 - package-ecosystem: docker
   directory: /
+  ignore:
+  - dependency-name: ubuntu
+    update-types:
+    - version-update:semver-major
+    - version-update:semver-minor
   schedule:
     interval: weekly
     day: tuesday
