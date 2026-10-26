@@ -233,12 +233,15 @@ and lists. Inline placeholders are supported. Keys are not expanded.
 Dates default to ISO `YYYY-MM-DD`. An optional format follows `|`, for example
 `{{DATE_FROM|%d/%m/%Y}}`. Supported format tokens are `%Y`, `%m`, `%d`, `%%`;
 separators are `-`, `/`, `.`, `_` and spaces. A format must contain a date
-field. Credentials do not accept a format. Unknown names, malformed delimiters,
-unsupported formats and date overflow are rejected.
+field. Credentials do not accept a format. The save/load gate rejects unknown names,
+malformed delimiters and unsupported formats. It checks syntax without reading
+the clock. Date arithmetic overflow is rejected at run start with the captured
+calendar context, before vault or browser access.
 
 Calendar values stay fixed for the run. `TZ` also controls cron schedules;
 Compose forwards root `.env` or exported shell `TZ`, with UTC as its default.
-An invalid zone fails validation. A recovery run can supply an ISO start date
+An invalid zone fails at run start when the calendar context is captured,
+before vault or browser access. A recovery run can supply an ISO start date
 through the memory-only stdin override, without persisting it in task settings.
 Replacement values are opaque and are never expanded again. An exact credential
 token preserves its optional `None` value. The legacy batch wrapper retains its
