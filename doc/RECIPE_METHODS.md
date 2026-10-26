@@ -78,10 +78,11 @@ design: a locator chain such as `get_by_role` -> `first` -> `filter` ->
 `get_by_label` -> `click` is valid, and new Playwright API added by a
 version bump stays supported automatically.
 
-Five method names are **reserved**: the runner intercepts them before
+Six method names are **reserved**: the runner intercepts them before
 Playwright dispatch and they are never passed to the browser API:
 `login`, `wait_user`, `expect_download`, `click_until_absent`,
-`download_all`. Their exact contracts are in section 3.
+`download_all`, `replacement_calendar`. Their exact contracts are in section 3
+and the [replacement-calendar contract](REPLACEMENT_CALENDARS.md).
 
 A method name that is neither reserved nor a public attribute of the
 chain object's type fails at execution with `Method '<name>' not found
@@ -169,8 +170,17 @@ consumer hook). A nested-step failure pauses the run (reason
 `download_failed`) with a resume retry; cancel/timeout abort.
 
 Constraint: bounded collection actions (`click_until_absent`,
-`download_all`) cannot appear nested under `expect_download` or in
+`download_all`, `replacement_calendar`) cannot appear nested under `expect_download` or in
 login phases.
+
+### `replacement_calendar` (daemon monthly calendars)
+
+Use one calendar-root locator followed by this terminal action. It follows the
+offered previous-month control over the inclusive run-start date window. Each
+month must prove its account, year, month, readiness and documents or empty state.
+The action cannot be graceful. An explicit operator resume skips keys already
+persisted by this step, scoped by account, key attribute and month. See the
+[options, limits and example](REPLACEMENT_CALENDARS.md).
 
 ### `click_until_absent` (bounded collection, PR #19)
 

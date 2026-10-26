@@ -93,6 +93,7 @@ does not grant automatic retries or count manual submissions in the login budget
 |---|---|
 | Expand a growing list | `click_until_absent`: exactly one supported page locator then the action; require visible-row count growth through `progress_selector`, `max_clicks` and `timeout_ms`. A visible disabled button is not completion. |
 | Download a fixed list | `download_all`: exactly one page locator then the action. Supply a stable non-empty unique `key_attribute`, `max_items`, `timeout_ms` and `event_window_ms`. Prove stable ordering and exactly one download per click. |
+| Traverse replacement calendars | Daemon `replacement_calendar`: one calendar-root locator, offered previous-month control, account/month/readiness proof and explicit empty markers. Visits all months in the run-start date window under shared bounds. See the [contract and example](REPLACEMENT_CALENDARS.md). |
 | Download one known document | `expect_download` with nested steps that trigger the click. Files pass through download tracking and per-task SHA-256 deduplication. |
 | Handle an empty list | Prove the portal's explicit empty state in a synthetic fixture. A collection with no downloads can still finish as `failure` under current run-result semantics. |
 

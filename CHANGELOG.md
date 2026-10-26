@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Daemon `replacement_calendar` recipe action for monthly replacement lists.
+  It follows offered previous-month controls over the run-start date window,
+  verifies identity/readiness and explicit empty states, and applies shared
+  month/item/time bounds. Operator resume skips persisted keys per account and
+  month. Existing filename collision and partial-download retention rules remain.
+
 - `billcollector doctor` proposes recipe repairs from a pause context.
   Configure `BC_LLM_URL`, `BC_LLM_MODEL` and optional `BC_LLM_API_KEY`,
   or use a saved `--llm-response`. Live replies only produce proposals.
