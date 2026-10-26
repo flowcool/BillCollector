@@ -15,7 +15,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import config
+from . import config, notice
 from .consumers import CONSUMERS
 from .interrupt import RunInterrupted
 from .redaction import sanitize_url
@@ -58,13 +58,16 @@ def _publish_unique(source, target_dir, filename):
                 index += 1
 
 
-def track_download(download, run_id, task, db):
+def track_download(download, run_id, task, db, *, identity=None):
     """Save one Playwright ``Download`` and record it in the DB.
 
     Returns the tracked record dict: run_id, task_id, url, filename, size,
     sha256, saved_path, duplicate (bool). Raises OSError on save failure -
     the runner treats that as a step failure (3x retry, then pause).
     """
+    source_identity = (notice.source_digest(str(download.url), identity)
+                       if identity is not None else None)
+    revision = None
     target_dir = download_dir(db)
     os.makedirs(target_dir, exist_ok=True)
     filename = str(download.suggested_filename).replace("\\", "/").rsplit("/", 1)[-1]
@@ -79,13 +82,17 @@ def track_download(download, run_id, task, db):
         download.save_as(str(staged))
         sha = sha256_of(staged)
         size = staged.stat().st_size
-        existing = db.find_download_by_sha(task_id, sha)
+        if identity is None:
+            existing = db.find_download_by_sha(task_id, sha)
+        else:
+            revision = notice.revision_digest(staged)
+            existing = db.find_notice_revision(task_id, source_identity, revision)
         duplicate = existing is not None
         saved_path = (existing["saved_path"] if duplicate else
                       _publish_unique(staged, target_dir, filename))
     if duplicate:
         logger.info(f"Download {filename} already tracked for this task "
-                    f"(sha256 {sha[:12]}, duplicate of Download {existing['id']}).")
+                    f"(duplicate of Download {existing['id']}).")
     else:
         for consume in CONSUMERS:
             try:
@@ -106,7 +113,8 @@ def track_download(download, run_id, task, db):
 
     db.insert_download(run_id, task_id, retained_url, filename, size, sha,
                        saved_path,
-                       duplicate_of_id=existing["id"] if duplicate else None)
+                       duplicate_of_id=existing["id"] if duplicate else None,
+                       source_identity=source_identity, revision_sha256=revision)
     return {
         "run_id": run_id,
         "task_id": task_id,
