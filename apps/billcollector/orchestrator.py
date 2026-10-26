@@ -198,8 +198,8 @@ class Orchestrator:
         except OSError:
             # Identity is unknown: do not reclaim a potentially active runner.
             return True
-        expected = [*self._runner_cmd, "run", str(task_id)]
-        return args == [os.fsencode(arg) for arg in expected]
+        expected = [os.fsencode(arg) for arg in [*self._runner_cmd, "run", str(task_id)]]
+        return args == expected or args == [*expected, b"--date-from-stdin"]
 
     def cleanup_orphans(self) -> int:
         """Startup hook: mark leftover active runs whose runner process is
