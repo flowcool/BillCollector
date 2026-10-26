@@ -123,12 +123,36 @@ def test_reused_pid_does_not_hold_task_and_dead_lock_is_released(isolated):
 
 
 def test_live_runner_identity_is_preserved(isolated):
-    command = [sys.executable, "-c", "import time; time.sleep(60)"]
-    child = subprocess.Popen([*command, "run", "7"])
+    command = [sys.executable, "-c", "import time; print('ready', flush=True); time.sleep(60)"]
+    child = subprocess.Popen([*command, "run", "7"], stdout=subprocess.PIPE, text=True)
     try:
+        assert child.stdout.readline().strip() == "ready"
         orch = Orchestrator(isolated, runner_cmd=command)
         assert orch._runner_matches(child.pid, 7)
         assert not orch._runner_matches(child.pid, 8)
+    finally:
+        child.terminate()
+        child.wait(timeout=10)
+
+
+@pytest.mark.parametrize("extra,live", [
+    ([], True),
+    (["--date-from-stdin"], True),
+    (["--unexpected"], False),
+    (["--date-from-stdin", "--unexpected"], False),
+])
+def test_orphan_cleanup_preserves_only_recognized_runner_commands(isolated, extra, live):
+    command = [sys.executable, "-c", "import time; print('ready', flush=True); time.sleep(60)"]
+    task = isolated.create_task("synthetic", "user")
+    child = subprocess.Popen([*command, "run", str(task), *extra], stdout=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout.readline().strip() == "ready"
+        run = isolated.create_run(task, pid=child.pid)
+        isolated.set_task_status(task, "running")
+        orch = Orchestrator(isolated, runner_cmd=command)
+        assert orch.cleanup_orphans() == (0 if live else 1)
+        assert isolated.get_run(run)["result"] == (None if live else "interrupted")
+        assert isolated.get_task(task)["status"] == ("running" if live else "idle")
     finally:
         child.terminate()
         child.wait(timeout=10)

@@ -18,6 +18,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pause notifications now default to an empty `ntfy_topic` (opt-in).
   Operators who used the implicit `billcollector` topic must set their
   topic in Settings. Existing stored topics remain active.
+- Daemon recipe validation checks the installed Playwright method chains,
+  argument names and types, properties, and reserved `wait_user` options (C3,
+  issue #27). UI save and run start use the same gate before vault or browser
+  access. Errors identify the service and step without argument values. The
+  agreed date-variable grammar and login `press("Enter")` form remain supported.
+
+- Daemon runtime date variables and inline, recursive single-pass argument
+  substitution (issue #26). Recipe save and run start share syntax validation.
+  Tasks have an additive `date_window_days` setting (90 inclusive days by
+  default); dates and cron scheduling use `TZ` with UTC fallback. Task-detail
+  Run now supports a memory-only start-date override with no restart replay.
+  The legacy batch substitution is unchanged.
+
+- Timezone configuration reaches the daemon through Compose: root `.env`
+  or exported `TZ` selects the zone, with UTC for unset or empty values.
+  The image no longer imposes Europe/Berlin, so direct execution can also
+  use `TZ` from `apps/.env`. Runtime environment values take precedence.
 
 - Self-hosted daemon with a NiceGUI web UI: `python3 -m billcollector serve`
   (binds `127.0.0.1:8000` by default; `--host`/`--port` or `BC_UI_HOST`

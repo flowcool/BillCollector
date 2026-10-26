@@ -381,7 +381,7 @@ def run_doctor(service, pause=None, from_run=None, db=None,
         return 2
 
     path = config.recipe_path_for(service)
-    ok, error, recipe_text, recipe_data = recipes.load_recipe(path)
+    ok, error, recipe_text, recipe_data = recipes.load_recipe(path, check_methods=False)
     if not ok:
         print(f"doctor: {error}")
         return 3

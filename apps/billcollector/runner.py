@@ -40,7 +40,7 @@ import signal
 import sys
 from datetime import datetime
 
-from helpers import CheckRecipe, ServiceObj, VARIABLE_MAP
+from helpers import ServiceObj, VARIABLE_MAP
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
@@ -48,9 +48,12 @@ from . import collection, config, display, downloads
 from .db import Database, now
 from .interrupt import RunInterrupted
 from .login import is_login, login_options, settle_attempt, validate_login_recipe
+from .methods import locator_arguments
 from .pagestate import PageState
 from .pause import pause_loop
 from .redaction import failure_category, failure_record
+from .recipes import load_recipe
+from .variables import DateContext, expand_argument, validate_variable_recipe
 from .vault import (
     VAULT_MAX_ATTEMPTS,
     VAULT_RETRY_BACKOFF,
@@ -359,30 +362,18 @@ def transform_step_to_json(step):
     return json.dumps(transformed_step, separators=(",", ":"))
 
 
+def process_argument(arg, bcs):
+    """Expand original argument values; credentials remain opaque data."""
+    credentials = {key[2:-2]: lambda resolver=resolver: resolver(bcs)
+                   for key, resolver in VARIABLE_MAP.items()}
+    return expand_argument(arg, credentials, getattr(bcs, "date_context", None))
+
+
 def _process_step(bcs, step, collection_actions=None):
     """Process a step by executing its method chain (legacy ``process_step``).
 
     Returns the step's PageState. A graceful step records its failure on the
     PageState and returns; a non-graceful step raises StepAbortError."""
-
-    def process_argument(arg, bcs):
-        """Processes a single argument:
-        - For a string that exactly matches a placeholder (e.g. "{{PASSWORD}}"), return the actual value.
-        - For a dictionary, replace any placeholder values (leaving the dict intact).
-        - For a list, process its elements recursively.
-        - Otherwise, return the argument unchanged.
-        """
-        if isinstance(arg, str):
-            return VARIABLE_MAP[arg](bcs) if arg in VARIABLE_MAP else arg
-        elif isinstance(arg, dict):
-            new_arg = {}
-            for key, value in arg.items():
-                new_arg[key] = VARIABLE_MAP[value](bcs) if isinstance(value, str) and value in VARIABLE_MAP else value
-            return new_arg
-        elif isinstance(arg, list):
-            return [process_argument(item, bcs) for item in arg]
-        else:
-            return arg
 
     if not isinstance(step, dict) or "methods" not in step:
         raise ValueError("Invalid step format: Expected a dictionary with a 'methods' key.")
@@ -701,35 +692,10 @@ def _wait_user_args(step, method):
     return prompt, until
 
 
-# The until-locator mapping (C5.5): the first key present in the until dict
-# selects the Playwright locator method; the whole dict is passed through as
-# keyword arguments (same shape as the recipe's locator methods, e.g.
-# {"role": "link", "name": "My account"}).
-_UNTIL_LOCATOR_KEYS = (
-    ("role", "get_by_role"),
-    ("test_id", "get_by_test_id"),
-    ("placeholder", "get_by_placeholder"),
-    ("label", "get_by_label"),
-    ("text", "get_by_text"),
-    ("selector", "locator"),
-)
-
-
 def _locator_for(page, until):
-    """Build a Playwright locator from a wait_user ``until`` dict.
-
-    Raises ValueError when the dict does not map to a known locator method -
-    a recipe authoring error that must surface before the operator is asked."""
-    if not isinstance(until, dict):
-        raise ValueError(f"wait_user 'until' must be a locator dict, got: {until!r}")
-    for key, method_name in _UNTIL_LOCATOR_KEYS:
-        if key in until:
-            method = getattr(page, method_name, None)
-            if method is None:
-                raise ValueError(f"no {method_name!r} locator method on the page")
-            return method(**until)
-    raise ValueError(
-        f"wait_user 'until' has no recognized locator key: {sorted(until)}")
+    """Build a locator with the same C3 mapping used at validation time."""
+    name, kwargs = locator_arguments(until)
+    return getattr(page, name)(**kwargs)
 
 
 def _execute_wait_user_step(ctx, step, method):
@@ -740,6 +706,11 @@ def _execute_wait_user_step(ctx, step, method):
     deadline; a missed deadline re-pauses with the same prompt. Cancel and
     timeout abort the run with their terminal outcome."""
     prompt, until = _wait_user_args(step, method)
+    bcs = getattr(ctx, "bcs", None)
+    # Pause prompts are retained in Run/notifications. Expand dates while
+    # keeping credential tokens literal, as in the existing pause flow.
+    prompt = expand_argument(prompt, None, getattr(bcs, "date_context", None))
+    until = process_argument(until, bcs)
     try:
         until_locator = None if until is None else _locator_for(ctx.page, until)
     except ValueError as e:
@@ -805,7 +776,7 @@ def _execute_step_with_pause(ctx, step):
 def _execute_login(ctx, step):
     """One durable transaction; each phase submits once, resume only verifies."""
     options = login_options(step)
-    locator = _locator_for(ctx.page, options["success"])
+    locator = _locator_for(ctx.page, process_argument(options["success"], ctx.bcs))
 
     def proven(timeout):
         try:
@@ -823,7 +794,7 @@ def _execute_login(ctx, step):
     # Find the latest completed phase before dispatching any credentials.
     for index in range(len(phases) - 2, -1, -1):
         try:
-            _locator_for(ctx.page, phases[index]["success"]).wait_for(
+            _locator_for(ctx.page, process_argument(phases[index]["success"], ctx.bcs)).wait_for(
                 state="visible", timeout=options["session_timeout_ms"])
             start = index + 1
             break
@@ -834,7 +805,7 @@ def _execute_login(ctx, step):
         for index in range(start, len(phases)):
             phase = phases[index]
             final = index == len(phases) - 1
-            marker = _locator_for(ctx.page, phase["success"])
+            marker = _locator_for(ctx.page, process_argument(phase["success"], ctx.bcs))
             for preparation in phase.get("steps", []):
                 _execute_step(ctx, preparation, parent_step=step["step"], single_attempt=True)
             if not reserved:
@@ -992,7 +963,7 @@ def _run_recipe(ctx, recipe):
     return files_downloaded, aborted, pause_outcome
 
 
-def run_task(task_id: int, debug: bool = False) -> int:
+def run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
     """Serialize all runner entries, including direct CLI invocations.
 
     A process-held lock survives neither crash nor SIGKILL, and must never be
@@ -1008,10 +979,12 @@ def run_task(task_id: int, debug: bool = False) -> int:
         except BlockingIOError:
             print("runner: task already has an active runner", file=sys.stderr)
             return 1
-        return _run_task(task_id, debug)
+        if date_from is None:
+            return _run_task(task_id, debug)
+        return _run_task(task_id, debug, date_from=date_from)
 
 
-def _run_task(task_id: int, debug: bool = False) -> int:
+def _run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
     """Execute one task run (sync Playwright step loop).
 
     Returns the process exit code: 0 on success, 1 on a run failure
@@ -1032,14 +1005,21 @@ def _run_task(task_id: int, debug: bool = False) -> int:
             return 1
 
         recipe_file = task["recipe_file"] or str(config.recipe_path_for(task["service"]))
-        recipe = CheckRecipe(recipe_file, str(config.RECIPE_SCHEMA))
-        if recipe is None:
-            print(f"runner: recipe {recipe_file} not found or invalid", file=sys.stderr)
+        ok, error, _text, recipe = load_recipe(recipe_file)
+        if not ok:
+            print(f"runner: {error}", file=sys.stderr)
             return 1
         try:
             validate_login_recipe(recipe)
         except ValueError as e:
             print(f"runner: invalid login contract: {e}", file=sys.stderr)
+            return 1
+
+        try:
+            dates = DateContext.capture(task["date_window_days"], date_from)
+            validate_variable_recipe(recipe, dates)
+        except ValueError as e:
+            print(f"runner: invalid variable contract: {e}", file=sys.stderr)
             return 1
 
         # C6: the runner owns the per-run display: claim a display from the
@@ -1080,6 +1060,7 @@ def _run_task(task_id: int, debug: bool = False) -> int:
                 os.environ["DISPLAY"] = f":{display_number}"
                 credentials = _vault_preflight(task, db)
                 ctx = _RunContext(task, run_id, db, debug, credentials, api_url)
+                ctx.bcs.date_context = dates
                 files, aborted, pause_outcome = _run_recipe(ctx, recipe)
                 result = run_result(aborted, files, pause_outcome)
             except RunInterrupted:
