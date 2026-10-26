@@ -2,7 +2,7 @@
 
 Use the daemon's [method contract](RECIPE_METHODS.md) and
 [phased-login contract](SAFE_LOGIN.md). This guide explains how to use them.
-The public implementation is the execution authority. A contract requirement
+The installed fork implementation is the execution authority. A contract requirement
 or an approved PR is not proof that a release already enforces it.
 
 ## Link a task to its recipe and vault item
@@ -51,8 +51,8 @@ describes the general surface and the five reserved names.
 `arguments` is a list of option objects merged into keyword arguments. Prefer
 one key per object for ordinary Playwright methods. A collection action uses
 one object containing all its required options. Match argument names and types
-to the installed API; schema validation alone does not catch every typo in the
-current public runner.
+to the installed API. The shared save/run gate checks method names, argument
+names/types and variable syntax before vault or browser access.
 
 ## Login, TOTP and variables
 
@@ -70,18 +70,21 @@ code. Use a separate recipe or a deliberate manual checkpoint for a genuinely
 different portal flow. Never substitute a real TOTP secret into a committed
 example.
 
-On the current public baseline, use only exact credential values
-`'{{USERNAME}}'`, `'{{PASSWORD}}'` and `'{{OTP}}'`. Do not embed them into a
-larger string or rely on arbitrary-depth nested substitution. [PR #34](https://github.com/s-t-e-f-a-n/BillCollector/pull/34) defines
-runtime dates and recursive inline expansion; use them only after verifying
-that implementation in your installed revision. C3/F08 also adds earlier
-method/argument/variable rejection. Until integrated, a successful schema check
-is not proof that every method or placeholder will work.
+This fork expands `{{USERNAME}}`, `{{PASSWORD}}` and `{{OTP}}` recursively in
+argument values. It also supports inline `{{TODAY}}`, `{{TODAY-7d}}`,
+`{{TODAY+1d}}`, `{{DATE_FROM}}` and `{{DATE_TO}}`. Dates use the task's
+`date_window_days` (default 90) and the effective `TZ`; the run captures its
+calendar context once. Formats can use `%Y`, `%m`, `%d`, `%%` and separators
+`- / . _` or spaces, for example `{{DATE_FROM|%d/%m/%Y}}`.
+The inclusive window starts `date_window_days - 1` days before `DATE_TO`.
+Replacement values remain opaque: a credential containing braces is not
+expanded a second time. Unknown variables, malformed delimiters and unsupported
+formats fail validation. See the [variable contract](RECIPE_METHODS.md#4-variables).
 
 A `wait_user` step pauses before execution and is consumed on resume. Use a
-standalone step with a clear prompt. When you add `until`, prefer a tested
-`selector` or `role` locator on this baseline; `label`/`placeholder` keyword
-normalization is part of the pending validation correction. A manual checkpoint
+standalone step with a clear prompt. Its `until` locator supports `selector`,
+`role`, `test_id`, `text`, `label` and `placeholder`; label and placeholder
+options are normalized to Playwright's `text` keyword. A manual checkpoint
 does not grant automatic retries or count manual submissions in the login budget.
 
 ## Pagination, empty lists and downloads
@@ -100,9 +103,9 @@ For ordinary steps, three attempts can execute the full chain before a pause.
 `graceful: true` means one attempt and continuation after a recorded failure.
 Use it only for an optional control whose absence you have verified.
 
-The current save path uses the suggested filename in the configured download
-directory. A same-name file can be replaced. Test with isolated files; do not
-claim collision-safe publication or archive delivery from a download result.
+The fork publishes distinct documents at unique paths in the configured
+download directory. A duplicate reuses its existing path. This does not prove
+crash-safe consumer delivery or archive receipt. Test with isolated files.
 
 ## Test without a real account
 

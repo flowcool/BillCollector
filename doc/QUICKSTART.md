@@ -1,9 +1,9 @@
 # Start the daemon
 
-This guide targets the public daemon, not the deprecated batch wrapper.
+This guide targets the daemon in `flowcool/BillCollector`, branch `playwright-next`.
 Use a fresh checkout and separate data directories for the first check.
-Validation baseline: public revision `d9362b3` (2026-10-25). Recheck the limits
-after upgrading.
+Runtime baseline: fork revision `cb43447` (2026-10-26), with dates and C3
+validation integrated. Recheck the limits after upgrading.
 [Limits and pending work](#limits-and-pending-work) identify what this guide
 cannot yet qualify for a permanent installation.
 
@@ -23,7 +23,7 @@ separately if you do not already have one. Never expose `bw serve` publicly.
 ## Prepare a fresh checkout
 
 ```bash
-git clone https://github.com/s-t-e-f-a-n/BillCollector.git
+git clone --branch playwright-next https://github.com/flowcool/BillCollector.git
 cd BillCollector
 git rev-parse HEAD
 mkdir -p apps/Downloads apps/db apps/data apps/browser/profiles
@@ -53,8 +53,8 @@ from the root `.env.example` for this local setup.
 Set `TZ=Europe/Zurich`, for example, in the root `.env` for local task
 schedules. The override below passes it into the container. An exported
 shell `TZ` takes precedence; an unset or empty value uses `UTC`.
-This explicit setting avoids the image's Europe/Berlin default on the
-validation baseline. `TZ` in `apps/.env` cannot override a container
+The reference Compose file also forwards this value; the image has no fixed
+timezone default. `TZ` in `apps/.env` cannot override a container
 environment value. After changing the zone, recreate the daemon and check
 the task schedules.
 
@@ -134,12 +134,13 @@ docker compose -p billcollector-local -f docker-compose.yml -f compose.local.yam
   The permanent recipe storage policy remains maintainer-owned (issue #27 F02).
 - The separate noVNC routing/authentication design remains maintainer-owned
   (issue #27 F03). This guide qualifies local UI access only.
-- Runtime date variables (PR #34), broader pre-run method validation (C3/F08),
-  collision recovery (PR #33) and empty-run semantics must be checked against
-  the public version you install. Do not assume approval means integration.
-- The current runner can report `failure` when there are no documents. The
-  default filename path can also be reused by later downloads. Keep the first
-  check isolated from an existing document archive.
+- Runtime date variables and pre-run method/argument validation are integrated
+  in this fork. Their upstream publication follows a separate schedule.
+- Durable crash recovery and consumer replay (upstream PR #33) are not yet
+  integrated here. Unique publication paths protect same-name documents, but
+  they do not make consumer delivery crash-safe.
+- The current runner can report `failure` when there are no documents. Keep
+  the first check isolated from an existing document archive.
 
 Until those items are integrated and verified, this is a local first-check
 procedure. A permanent deployment and a real-provider collection require their

@@ -63,6 +63,9 @@ object (`getattr(previous_result, method_name)`):
   the same object;
 - a non-callable attribute is read as a property (no arguments allowed).
 
+Primitive and collection results can end a chain. Their Python methods
+(for example `str.upper` or `list.pop`) cannot continue a recipe chain.
+
 Therefore the supported Playwright surface is the **public API of the
 pinned Playwright version** (`playwright==1.64.0`, `apps/requirements.txt`)
 reachable through the chain that starts on a `Page`: the public
@@ -215,30 +218,39 @@ be nested.
 
 ## 4. Variables
 
-Supported placeholders (exact-string substitution of argument values,
-recursing into nested dicts and lists; every other string passes
-through unchanged):
+The daemon expands original string argument values recursively in dictionaries
+and lists. Inline placeholders are supported. Keys are not expanded.
 
 | placeholder | resolution |
 |---|---|
 | `{{USERNAME}}` | the task's username from the vault item |
 | `{{PASSWORD}}` | the task's password from the vault item |
-| `{{OTP}}` | a fresh TOTP fetched from the vault **at substitution time** (TOTP codes go stale; fallback: the run-start credential when the item has no TOTP or the fetch fails) |
+| `{{OTP}}` | a fresh TOTP fetched at substitution time, with the existing run-start fallback |
+| `{{TODAY}}`, `{{DATE_TO}}` | the calendar date captured at run start in the effective `TZ` |
+| `{{TODAY-7d}}`, `{{TODAY+1d}}` | that date minus/plus the specified non-negative number of days |
+| `{{DATE_FROM}}` | the inclusive task window start: `DATE_TO - (date_window_days - 1)` days; default window 90 |
 
-Substitution is exact-match on the whole value: a string is substituted
-only when it equals a placeholder exactly, so a longer string containing
-a placeholder is not substituted. Validation (F08) must therefore reject
-any `{{...}}` sequence other than the three supported placeholders -
-including one embedded in a longer string, which would otherwise reach
-the portal unchanged.
+Dates default to ISO `YYYY-MM-DD`. An optional format follows `|`, for example
+`{{DATE_FROM|%d/%m/%Y}}`. Supported format tokens are `%Y`, `%m`, `%d`, `%%`;
+separators are `-`, `/`, `.`, `_` and spaces. A format must contain a date
+field. Credentials do not accept a format. Unknown names, malformed delimiters,
+unsupported formats and date overflow are rejected.
+
+Calendar values stay fixed for the run. `TZ` also controls cron schedules;
+Compose forwards root `.env` or exported shell `TZ`, with UTC as its default.
+An invalid zone fails validation. A recovery run can supply an ISO start date
+through the memory-only stdin override, without persisting it in task settings.
+Replacement values are opaque and are never expanded again. An exact credential
+token preserves its optional `None` value. The legacy batch wrapper retains its
+separate substitution behavior.
 
 ## 5. Validation requirements (F08)
 
 Gate: the daemon runner already validates the recipe before display
-allocation, vault preflight and browser launch (`CheckRecipe` schema
-check + `validate_login_recipe` in `runner.py::_run_task`); the UI
+allocation, vault preflight and browser launch (the shared
+`validate_recipe` gate in `runner.py::_run_task`); the UI
 validates on load and on save (`apps/billcollector/recipes.py`). The
-hardening lands in these same gates (`validate_recipe` / the schema /
+hardening is enforced in these same gates (`validate_recipe` / the schema /
 `validate_login_recipe`), so a rejected recipe never reaches vault or
 browser access.
 
@@ -253,7 +265,7 @@ multi-per-recipe `login`, `submit`/`phases` outside a login block, the
 login locator-chain terminal rules, and all section-3 `login`
 argument violations.
 
-F08 must additionally reject, before vault/browser access:
+F08 also rejects, before vault/browser access:
 
 - a `method` name that is not a reserved name (section 3) and not a
   public attribute of the chain object's type in the pinned Playwright
@@ -262,7 +274,7 @@ F08 must additionally reject, before vault/browser access:
   locator set;
 - `wait_user` argument violations: unknown argument names, and an
   `until` that is not a locator dict or has no recognized locator key
-  (today silently ignored or failing only at execution);
+  (including invalid locator arguments);
 - unsupported variables (any `{{...}}` sequence other than section 4,
   including one embedded in a longer string).
 
