@@ -236,8 +236,10 @@ def track_download(download, run_id, task, db):
         saved = target / filename
         # Legacy publication without a row: adopt only an exact filename/hash
         # match observed on this task's new download. Do not invoke consumers.
-        reserved = {r["saved_path"] for r in db.list_downloads()}
-        orphan = str(saved) not in reserved and saved.is_file() and sha256_of(saved) == sha
+        rows = db.list_downloads()
+        known = {r["saved_path"] for r in rows}
+        reserved = {r["saved_path"] for r in rows if r["state"] != "consumed"}
+        orphan = str(saved) not in known and saved.is_file() and sha256_of(saved) == sha
         if not orphan:
             stem, ext = os.path.splitext(filename)
             index = 0

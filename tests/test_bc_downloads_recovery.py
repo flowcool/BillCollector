@@ -392,16 +392,22 @@ def test_runner_sqlite_recovery_failure_stops_before_portal_and_closes_db(
         raw_connection.execute("SELECT 1")
 
 
-def test_collision_keeps_smallest_free_numeric_suffix_and_reserved_rows(tracking):
+def test_collision_keeps_smallest_free_numeric_suffix_and_pending_rows(tracking):
     db, task, run = tracking
-    first = downloads.track_download(Document(), run, task, db)
+
+    def unavailable(record):
+        raise OSError("synthetic consumer unavailable")
+
+    with patch.object(downloads, "CONSUMERS", [unavailable]):
+        first = downloads.track_download(Document(), run, task, db)
     output = Path(downloads.download_dir(db))
     Path(first['saved_path']).unlink()  # A consumer has already moved this file.
     (output / 'invoice (2).pdf').write_bytes(b'occupied')
     second_task = {'id': db.create_task('synthetic', 'second')}
-    second = downloads.track_download(Document(), db.create_run(second_task['id']), second_task, db)
-    third_task = {'id': db.create_task('synthetic', 'third')}
-    third = downloads.track_download(Document(), db.create_run(third_task['id']), third_task, db)
+    with patch.object(downloads, "CONSUMERS", [unavailable]):
+        second = downloads.track_download(Document(), db.create_run(second_task['id']), second_task, db)
+        third_task = {'id': db.create_task('synthetic', 'third')}
+        third = downloads.track_download(Document(), db.create_run(third_task['id']), third_task, db)
     assert Path(second['saved_path']).name == 'invoice (1).pdf'
     assert Path(third['saved_path']).name == 'invoice (3).pdf'
     assert (output / 'invoice (2).pdf').read_bytes() == b'occupied'
@@ -428,3 +434,17 @@ def test_real_recovery_child_reports_safe_failure_category(tracking, reason):
     assert str(db.path) not in text
     assert row['saved_path'] not in text
     assert db.list_downloads()[0]['state'] == 'staged'
+
+
+def test_consumed_file_moved_by_watcher_releases_its_name(tracking):
+    db, task, run = tracking
+    first = downloads.track_download(Document(), run, task, db)
+    assert db.list_downloads()[0]['state'] == 'consumed'
+    Path(first['saved_path']).unlink()
+    other = {'id': db.create_task('synthetic', 'other')}
+    calls = []
+    with patch.object(downloads, 'CONSUMERS', [calls.append]):
+        second = downloads.track_download(Document(), db.create_run(other['id']), other, db)
+    assert second['saved_path'] == first['saved_path']
+    assert len(calls) == 1
+    assert calls[0]['idempotency_key'] != f"{task['id']}:{first['sha256']}"

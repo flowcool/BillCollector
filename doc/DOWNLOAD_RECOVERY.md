@@ -20,8 +20,10 @@ tracker, recipe contract, control protocol or exit codes.
 The output-directory lock serializes publication and recovery across runner
 processes. A new file cannot overwrite a previous managed publication. A name
 collision gets the smallest free ` (n)` suffix in `saved_path`; `filename`
-retains the portal basename. Committed Download rows reserve names even when
-their file has not been published or has already been moved by a watcher. The fork strips both slash forms from suggested filenames and uses
+retains the portal basename. Pending Download rows reserve names even when
+their file has not been published or has already been moved by a watcher.
+Consumed rows do not reserve absent files; their names can be reused. The fork
+strips both slash forms from suggested filenames and uses
 `download` for an empty, `.` or `..` basename. The reserved `.billcollector`
 basename is rejected so a document cannot replace publication state. A
 same-task/hash repeat retains an audit row and the original path; it does not
