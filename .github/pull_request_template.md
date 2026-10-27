@@ -19,7 +19,7 @@ State whether AI assisted this change and what the author verified.
 
 Pullfrog is the sole reviewer. Require a completed review of the final head,
 resolve actionable threads and keep all CI checks green. Ignore CodeRabbit and
-the known sticky `pullfrog-approval` status only. Documentation-only PRs
-(`docs/`, `openspec/`, `*.md`) need CI only.
+the known sticky `pullfrog-approval` status only. PRs that change only
+`*.md` files need CI only.
 
 Review evidence: <!-- completed review URL and reviewed commit SHA -->

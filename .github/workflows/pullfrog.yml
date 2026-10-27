@@ -22,7 +22,8 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      # Local addition: documentation-only PRs (docs/, openspec/, *.md) are not
+      # Local addition: documentation-only PRs (only *.md files, docs/ or
+      # openspec/, the pr-gate rule; doc/ assets still get a review) are not
       # reviewed. Fails open: without a PR number or file list, the review runs.
       - name: Skip documentation-only PRs
         id: scope
