@@ -9,6 +9,15 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    # Documentation-only PRs are not reviewed (conventional "docs" titles).
+    ignore_title_keywords:
+      - "docs:"
+      - "docs("
+  # Documentation and specs are not reviewed.
+  path_filters:
+    - "!**/*.md"
+    - "!docs/**"
+    - "!openspec/**"
   path_instructions:
     - path: "apps/**/*.py"
       instructions: >-
