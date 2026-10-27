@@ -29,6 +29,7 @@ def main():
         # Root deploy config, git metadata, rotated logs and other .gitignore'd artifacts.
         ".env", ".git/config", "apps/bc.log.1", "apps/bc_default.ini.bak", "apps/invoice_page.html",
         "apps/chrome-linux64/chrome", "apps/.pytest_cache/state",
+        "tmp/qualification/receipt.json",
     )
     retained = (
         "apps/BillCollector.py", "apps/requirements.txt", "apps/.env.example",
