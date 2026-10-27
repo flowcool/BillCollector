@@ -156,6 +156,24 @@ jobs:
           test "$(docker run --rm --network none --entrypoint id billcollector-playwright:ci -u)" != "0"
           docker run --rm --network none --entrypoint python3 billcollector-playwright:ci -c \
             'from playwright.sync_api import sync_playwright; p = sync_playwright().start(); b = p.chromium.launch(); b.close(); p.stop()'
+      - name: Verify required Chromium sandbox in both packaged launchers
+        run: |
+          python3 tests/run_sandbox_container.py --image billcollector-playwright:ci \
+            --profile docker/chromium-seccomp.json --expect active --output tmp/sandbox-active
+      - name: Verify packaged browser, daemon and legacy mock-portal regression
+        run: |
+          python3 tests/run_sandbox_container.py --image billcollector-playwright:ci \
+            --profile docker/chromium-seccomp.json --runtime-regression --output tmp/sandbox-regression
+      - name: Retain sandbox and runtime qualification receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sandbox-runtime-proof
+          path: |
+            tmp/sandbox-active/
+            tmp/sandbox-regression/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Record image vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

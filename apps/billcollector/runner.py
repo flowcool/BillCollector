@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import signal
+import sqlite3
 import sys
 from datetime import datetime
 
@@ -317,6 +318,7 @@ def _launch_browser(ctx, p):
     ctx.context = p.chromium.launch_persistent_context(
         user_data_dir=str(profile_dir),
         headless=False,
+        chromium_sandbox=True,
         args=config.chromium_args(),
     )
     ctx.page = ctx.context.new_page()
@@ -1015,6 +1017,14 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
         task = db.get_task(task_id)
         if task is None:
             print(f"runner: task {task_id} not found", file=sys.stderr)
+            return 1
+
+        # Recover before display/vault/browser setup. Consumers remain in the
+        # runner subprocess, never on the daemon/UI event loop.
+        try:
+            downloads.recover_downloads(db)
+        except (OSError, ValueError, sqlite3.Error) as e:
+            logger.error("Download recovery failed: %s", failure_record("download_recovery", e))
             return 1
 
         if task["login_locked"] or task["login_pending_run_id"] is not None:
