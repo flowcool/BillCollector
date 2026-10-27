@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 # Fixed child interpreter/module, argument list, and no shell.
 import subprocess  # nosec B404
 import sys
@@ -24,6 +25,17 @@ from .interrupt import RunInterrupted
 from .redaction import sanitize_url
 
 logger = logging.getLogger(__name__)
+# Private recovery-child exit codes. Parent diagnostics contain fixed text only.
+_RECOVERY_FAILURES = {65: "checksum mismatch", 66: "reserved destination occupied",
+                      70: "database failure", 74: "filesystem failure", 77: "permission denied"}
+
+
+class _RecoveryFailure(OSError):
+    def __init__(self, message, exit_code):
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
 _CHUNK = 1024 * 1024
 _FIELDS = ("run_id", "task_id", "url", "filename", "size", "sha256", "saved_path")
 
@@ -77,7 +89,7 @@ def _deliver(row, db):
     for consume in CONSUMERS:
         saved = Path(row["saved_path"])
         if saved.exists() and (not saved.is_file() or sha256_of(saved) != row["sha256"]):
-            raise OSError("Published download checksum mismatch")
+            raise _RecoveryFailure("Published download checksum mismatch", 65)
         try:
             consume(record.copy())
         except RunInterrupted:
@@ -111,14 +123,14 @@ def _publish(row, db):
     saved = Path(row["saved_path"])
     if staged.exists():
         if sha256_of(staged) != row["sha256"]:
-            raise OSError("Staged download checksum mismatch")
+            raise _RecoveryFailure("Staged download checksum mismatch", 65)
         if saved.exists():
-            raise OSError("Reserved download destination already exists")
+            raise _RecoveryFailure("Reserved download destination already exists", 66)
         os.rename(staged, saved)
         _sync_dir(saved.parent)
         _sync_dir(staged.parent)
     elif saved.exists() and sha256_of(saved) != row["sha256"]:
-        raise OSError("Published download checksum mismatch")
+        raise _RecoveryFailure("Published download checksum mismatch", 65)
     # A downstream folder watcher may already have moved the published file.
     # The committed intent and disappearance of the staged file retain the
     # delivery obligation; consumers use the stable key on re-delivery.
@@ -224,10 +236,14 @@ def track_download(download, run_id, task, db):
         saved = target / filename
         # Legacy publication without a row: adopt only an exact filename/hash
         # match observed on this task's new download. Do not invoke consumers.
-        known = any(r["saved_path"] == str(saved) for r in db.list_downloads())
-        orphan = not known and saved.is_file() and sha256_of(saved) == sha
-        if saved.exists() and not orphan:
-            saved = target / f"{Path(filename).stem}-{uuid4().hex}{Path(filename).suffix}"
+        reserved = {r["saved_path"] for r in db.list_downloads()}
+        orphan = str(saved) not in reserved and saved.is_file() and sha256_of(saved) == sha
+        if not orphan:
+            stem, ext = os.path.splitext(filename)
+            index = 0
+            while saved.exists() or str(saved) in reserved:
+                index += 1
+                saved = target / f"{stem} ({index}){ext}"
         record["saved_path"] = str(saved)
         # Keep the portal filename as metadata; saved_path identifies storage.
         with (entry / "manifest.json").open("x") as stream:
@@ -273,18 +289,30 @@ def recover_downloads_in_subprocess(db):
         raise RuntimeError(
             f"Download startup recovery timed out after {timeout}s; daemon not started") from None
     if result.returncode:
+        reason = _RECOVERY_FAILURES.get(result.returncode)
+        diagnostic = f"; {reason}" if reason else ""
         raise RuntimeError(
-            f"Download startup recovery failed (exit code {result.returncode}); daemon not started")
+            f"Download startup recovery failed (exit code {result.returncode}{diagnostic}); daemon not started")
 
 
 if __name__ == "__main__":
     from .db import Database
 
-    database = Database(path=sys.argv[1])
+    database = None
     try:
+        database = Database(path=sys.argv[1])
         recover_downloads(database)
+    except _RecoveryFailure as error:
+        sys.exit(error.exit_code)
+    except PermissionError:
+        sys.exit(77)
+    except sqlite3.Error:
+        sys.exit(70)
+    except OSError:
+        sys.exit(74)
     except Exception:
         # Do not persist raw exception text or paths from recovery/consumers.
         sys.exit(1)
     finally:
-        database.close()
+        if database is not None:
+            database.close()

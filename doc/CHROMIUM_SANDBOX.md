@@ -39,6 +39,20 @@ Do not add `SYS_ADMIN`, privileged mode, host networking or a sandbox-disabling
 flag to make a failed launch pass. Record the exact host/image failure first.
 Native installs also require working kernel sandbox support.
 
+### Native Ubuntu AppArmor policy
+
+Ubuntu 23.10 and later can restrict unprivileged user namespaces through
+AppArmor. On Ubuntu 24.04, inspect
+`sysctl kernel.apparmor_restrict_unprivileged_userns` and the kernel denial log.
+A value of `1` can block the bundled Chromium binary even when ordinary user
+namespaces are enabled. An operator must approve a suitable AppArmor profile
+for that exact executable, or explicitly approve the broader host change
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`.
+The latter relaxes a host-wide restriction until reboot; restore the recorded
+previous value to undo it. It is not an application fallback. The CI workflow
+uses it only on its disposable Ubuntu runner. No deployment host is changed.
+Chromium still launches with `chromium_sandbox=True`.
+
 ## Reproducible isolated proof
 
 Build from a disposable checkout. Use no real `.env`, vault, provider or data.
@@ -89,10 +103,13 @@ wrapper is only for baseline qualification and is not a production input.
 The local result qualifies the exact tested image and host. It does not prove
 compatibility on UGreen or another host. Tests use a synthetic PDF and storage;
 no real portal or account is required. Full pytest and the existing mock-portal
-regression remain required for the candidate. No CI infrastructure is introduced
-by this upstream contribution. Earlier fork qualification is linked in the PR.
+regression remain required for the candidate. Fork CI runs the active-sandbox
+check and packaged runtime regression in the built image (`image-scan` job).
+Earlier fork qualification is linked in the PR.
 
-Rollback the focused candidate commit. Before a real deployment, retain the
+Revert the final PR merge with `git revert -m 1 <pr-merge-commit>`. This reverts
+the synchronization and its follow-up fixes together. Before a real deployment,
+retain the
 previous image and Compose revision. A deployment or a host policy change needs
 its own authorization. Disabling the sandbox changes the security posture and
 must not be presented as an equivalent supported mode.

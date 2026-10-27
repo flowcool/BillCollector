@@ -19,8 +19,9 @@ tracker, recipe contract, control protocol or exit codes.
 
 The output-directory lock serializes publication and recovery across runner
 processes. A new file cannot overwrite a previous managed publication. A name
-collision gets a UUID suffix in `saved_path`; `filename` retains the portal
-basename. The fork strips both slash forms from suggested filenames and uses
+collision gets the smallest free ` (n)` suffix in `saved_path`; `filename`
+retains the portal basename. Committed Download rows reserve names even when
+their file has not been published or has already been moved by a watcher. The fork strips both slash forms from suggested filenames and uses
 `download` for an empty, `.` or `..` basename. The reserved `.billcollector`
 basename is rejected so a document cannot replace publication state. A
 same-task/hash repeat retains an audit row and the original path; it does not
@@ -45,7 +46,10 @@ not shown on the Settings page) limits this subprocess to 300 seconds by
 default. Set its row in the `Settings` table to a positive integer number of
 seconds to change the limit. Invalid values prevent startup. On timeout, the parent kills and
 waits for the child, then reports that the daemon did not start. A nonzero child
-exit reports its exit code. Neither diagnostic exposes document data or paths.
+exit reports its exit code and a fixed category when known: checksum mismatch,
+reserved destination occupied, permission denied, filesystem failure or database
+failure. Child output remains discarded. No diagnostic exposes exception text,
+document data or paths.
 Recovery can resume from committed state on the next start. A timeout can
 interrupt a consumer after its external effect, so the same stable key can be
 delivered again.

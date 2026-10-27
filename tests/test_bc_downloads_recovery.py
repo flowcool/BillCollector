@@ -390,3 +390,41 @@ def test_runner_sqlite_recovery_failure_stops_before_portal_and_closes_db(
     assert "synthetic-secret" not in caplog.text
     with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
         raw_connection.execute("SELECT 1")
+
+
+def test_collision_keeps_smallest_free_numeric_suffix_and_reserved_rows(tracking):
+    db, task, run = tracking
+    first = downloads.track_download(Document(), run, task, db)
+    output = Path(downloads.download_dir(db))
+    Path(first['saved_path']).unlink()  # A consumer has already moved this file.
+    (output / 'invoice (2).pdf').write_bytes(b'occupied')
+    second_task = {'id': db.create_task('synthetic', 'second')}
+    second = downloads.track_download(Document(), db.create_run(second_task['id']), second_task, db)
+    third_task = {'id': db.create_task('synthetic', 'third')}
+    third = downloads.track_download(Document(), db.create_run(third_task['id']), third_task, db)
+    assert Path(second['saved_path']).name == 'invoice (1).pdf'
+    assert Path(third['saved_path']).name == 'invoice (3).pdf'
+    assert (output / 'invoice (2).pdf').read_bytes() == b'occupied'
+    assert not Path(first['saved_path']).exists()
+
+
+@pytest.mark.parametrize('reason', ['checksum mismatch', 'reserved destination occupied'])
+def test_real_recovery_child_reports_safe_failure_category(tracking, reason):
+    db, task, run = tracking
+    # Leave a committed row before its publish, then force a real startup error.
+    with patch.object(downloads, '_publish', side_effect=OSError('stop before rename')):
+        with pytest.raises(OSError):
+            downloads.track_download(Document(), run, task, db)
+    row, = db.list_downloads()
+    if reason == 'checksum mismatch':
+        Path(row['staged_path']).write_bytes(b'synthetic-secret damaged')
+    else:
+        Path(row['saved_path']).write_bytes(b'synthetic-secret occupied')
+    with pytest.raises(RuntimeError) as error:
+        downloads.recover_downloads_in_subprocess(db)
+    text = str(error.value)
+    assert reason in text
+    assert 'synthetic-secret' not in text
+    assert str(db.path) not in text
+    assert row['saved_path'] not in text
+    assert db.list_downloads()[0]['state'] == 'staged'
