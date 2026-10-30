@@ -192,7 +192,7 @@ Now that we have done a good job installing all the prerequisites, we are focusi
 
    and set `BW_API_URL` to the HTTP URL of your local `bw serve` API (e.g., `http://<local-ip>:8087`; it must resolve only to loopback/private addresses, HTTPS is refused). See [Vaultwarden and Bitwarden](#vaultwarden-and-bitwarden).
 
-4. Optionally, create a root `.env` with the compose variables - all of them have defaults, the file is optional: `TZ` (daemon calendar dates and cron schedules, default `UTC`), `BC_UI_PORT` (published UI port, default `8766`), `NTFY_HOST` (push server for pause notifications, default `https://ntfy.sh`), `NTFY_BASE_URL` (LAN-absolute deep links, with the bundled ntfy), `APP_UID`/`APP_GID` (container user).
+4. Optionally, create a root `.env` with the compose variables - all of them have defaults, the file is optional: `TZ` (daemon calendar dates and cron schedules, default `UTC`), `BC_UI_PORT` (published UI port, default `8766`), `NTFY_HOST` (push server for notifications, default `https://ntfy.sh`), `NTFY_BASE_URL` (LAN-absolute deep links, with the bundled ntfy), `APP_UID`/`APP_GID` (container user).
 
    Set `TZ=Europe/Zurich`, for example, to use local dates and schedules.
    Compose reads `TZ` from the shell first, then the root `.env`; an unset
@@ -221,7 +221,17 @@ Now that we have done a good job installing all the prerequisites, we are focusi
 
 ### Pause notifications (ntfy)
 
-A fresh installation sends no notifications: the `ntfy topic` setting starts empty, and a paused run (or a blocked login) only pushes when you set a topic. To opt in, open **Settings** and set an **ntfy topic** - choose your own topic name, it is the install-specific destination the pushes are sent to.
+A fresh installation sends no notifications: the `ntfy topic` setting (`ntfy_topic` in Settings) starts empty. Paused runs, blocked logins, and failed or interrupted daemon runs only push when you set a topic. To opt in, open **Settings** and set an **ntfy topic** - choose your own topic name, it is the install-specific destination the pushes are sent to.
+
+Daemon runs send one terminal notification on failure, interruption, or an attention
+timeout. This includes failed startup, crashed runners, shutdown, orphan recovery, and
+the dashboard **Stop** action (which records `interrupted`).
+These terminal messages contain no URLs, account details, secrets, or error output.
+Successful runs and **Cancel** in a pause (which records `cancelled`) stay silent.
+Terminal sends run off the daemon event
+loop; a failed send is logged without its endpoint or exception text and is not
+retried. It never changes the run result or prevents resource cleanup. Existing
+pause and login-lock notifications keep their separate behavior and deep links.
 
 The push server defaults to the public [ntfy.sh](https://ntfy.sh). To run your own push server in the same stack instead:
 
@@ -255,7 +265,7 @@ unchanged. Correct it through the task editor before relying on its schedule.
 - `BW_API_HOST=127.0.0.1:8087` (optional): Host header for a `bw serve` in another container
 - `BC_UI_HOST`: daemon UI bind host (default `127.0.0.1`; set `0.0.0.0` inside the container)
 - `BC_UI_PASSWORD` (optional): seeds the UI password hash on the first start (a hash set via the UI is never overwritten)
-- `NTFY_HOST`: push server for the pause notifications (default `https://ntfy.sh`)
+- `NTFY_HOST`: push server for notifications (default `https://ntfy.sh`)
 - `BC_CHROMIUM_ARGS=--disable-software-rasterizer`: dev-host launch workaround only; leave unset for stock behavior
 - `VAULT_HOST` is no longer used, see [doc/vault_transport.md](doc/vault_transport.md)
 

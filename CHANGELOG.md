@@ -20,6 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Opt-in daemon terminal ntfy pushes (`ntfy_topic`) for failed, interrupted and
+  attention-timeout runs. Shutdown, dashboard Stop and startup orphan recovery
+  notify too. Success and pause cancellation stay silent. Fixed terminal
+  messages contain no URLs, account details or secrets; send failures only log.
+
 - `download_all` options `incremental` (persisted per-task source keys; later runs
   skip known keys) and `unpack: pdf` (publish the single PDF member of a ZIP).
   Downloads gain an additive `source_key` column.
