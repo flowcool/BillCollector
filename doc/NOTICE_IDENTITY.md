@@ -2,8 +2,9 @@
 
 This is a local fork extension. Upstream issue #38 remains a separate agreement.
 The collector owns repeat suppression. Paperless owns archive storage. A download
-record is not an archive receipt. This feature does not change delivery recovery,
-consumer error handling, run results, scheduling, or financial import behavior.
+record is not an archive receipt. The local integration uses the selected engine
+publication journal and the strict notice delivery rule below. Run results,
+scheduling and financial import behavior keep their existing contracts.
 
 ## Recipe interface
 
@@ -84,10 +85,14 @@ Different sources can publish identical bytes; different tasks never share the
 notice-identity dedup key. A task/account reconfiguration needs its own history
 and recovery decision.
 
-The existing publication/consumer/DB crash window remains unchanged. There is
-no exactly-once consumer guarantee. Keep existing originals and database backup
-procedures. An unavailable archive copy is not recovered by re-downloading an
-unchanged revision; use the archive recovery procedure.
+The journal commits the row before local publication and consumer effects.
+An opted-in notice commits `delivery_uncertain` before calling a consumer.
+A crash or consumer exception preserves that state. Automatic recovery skips
+the row and the provider stops until explicit receipt reconciliation. This is
+not an exactly-once consumer guarantee. Generic downloads retain the selected
+engine's at-least-once recovery rule. See [Bourse Direct](BOURSE_DIRECT.md) for
+matching-receipt acknowledgement and pending-acquisition handling. Keep originals
+and DB backups. Re-downloading an unchanged revision does not resend it.
 
 Rollback: revert the code commit. Keep the additive columns; the old engine
 ignores them. Restore a pre-change DB backup only under an independently approved
