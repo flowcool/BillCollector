@@ -224,9 +224,11 @@ Now that we have done a good job installing all the prerequisites, we are focusi
 A fresh installation sends no notifications: the `ntfy topic` setting (`ntfy_topic` in Settings) starts empty. Paused runs, blocked logins, and failed or interrupted daemon runs only push when you set a topic. To opt in, open **Settings** and set an **ntfy topic** - choose your own topic name, it is the install-specific destination the pushes are sent to.
 
 Daemon runs send one terminal notification on failure, interruption, or an attention
-timeout. This includes failed startup, crashed runners, shutdown, and orphan recovery.
+timeout. This includes failed startup, crashed runners, shutdown, orphan recovery, and
+the dashboard **Stop** action (which records `interrupted`).
 These terminal messages contain no URLs, account details, secrets, or error output.
-Successful and cancelled runs stay silent. Terminal sends run off the daemon event
+Successful runs and **Cancel** in a pause (which records `cancelled`) stay silent.
+Terminal sends run off the daemon event
 loop; a failed send is logged without its endpoint or exception text and is not
 retried. It never changes the run result or prevents resource cleanup. Existing
 pause and login-lock notifications keep their separate behavior and deep links.

@@ -329,6 +329,24 @@ class RunNotificationTests(OrchestratorTestBase):
                          b"A collector run was interrupted. Check the BillCollector dashboard.")
         self.assertEqual(self.db.list_runs(self.task_id)[0]["result"], "interrupted")
 
+    def test_dashboard_stop_sends_one_interruption_push(self):
+        orch = self._orch("crash", sleep=30)
+        async def scenario():
+            self.assertTrue(await orch.start_run(self.task_id))
+            monitor = orch.monitors[self.task_id]
+            for _ in range(400):
+                if self.db.list_runs(self.task_id):
+                    break
+                await asyncio.sleep(0.01)
+            self.assertTrue(self.db.list_runs(self.task_id))
+            self.assertTrue(await orch.stop_run(self.task_id))
+            await monitor
+            await orch.shutdown()
+        asyncio.run(scenario())
+        self.post.assert_called_once()
+        self.assertEqual(self.post.call_args.kwargs["data"],
+                         b"A collector run was interrupted. Check the BillCollector dashboard.")
+
     def test_orphan_recovery_notifies_only_on_first_cleanup(self):
         run_id = self.db.create_run(self.task_id)
         self.assertEqual(self.orch.cleanup_orphans(), 1)
