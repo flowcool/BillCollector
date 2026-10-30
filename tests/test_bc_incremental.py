@@ -108,11 +108,15 @@ class IncrementalRunnerTests(_Base):
         runner._collection_actions(ctx)["download_all"](listing, {
             "key_attribute": attribute, "max_items": 10, "timeout_ms": 1000,
             "event_window_ms": 2, "incremental": incremental})
+        self.last_context = ctx
         return listing.clicked
 
     def test_new_session_skips_known_and_only_clicks_new_document(self):
         self.assertEqual(self.collect(["a", "b"]), ["a", "b"])
         self.assertEqual(self.collect(["a", "b"]), [])
+        self.assertEqual(runner.run_result(False, [], known_source_count=self.last_context.incremental_known_count), "success")
+        self.assertEqual(runner.run_result(False, []), "failure")
+        self.assertEqual(runner.run_result(True, [], known_source_count=2), "failure")
         self.assertEqual(self.collect(["a", "b", "c"]), ["c"])
         self.assertEqual(len(self.db.list_downloads()), 3)
 

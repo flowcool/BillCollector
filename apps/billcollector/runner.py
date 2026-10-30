@@ -136,14 +136,16 @@ def step_attempts(graceful: bool) -> int:
     return 1 if graceful else MAX_STEP_ATTEMPTS
 
 
-def run_result(aborted: bool, files_downloaded: list, pause_outcome=None) -> str:
+def run_result(aborted: bool, files_downloaded: list, pause_outcome=None, *,
+               known_source_count=0) -> str:
     """Terminal Run.result of a finished run.
 
     A pause outcome is terminal in itself: cancel -> ``cancelled``,
     timeout -> ``needs_attention`` (decision: the operator can retry a
     timed-out run manually later). Otherwise the legacy success contract:
     success requires a completed run (no abort) with at least one
-    successfully downloaded file."""
+    successfully downloaded file, or a completed incremental collection that
+    explicitly skipped committed source keys."""
     if pause_outcome == "cancel":
         return "cancelled"
     if pause_outcome == "timeout":
@@ -151,7 +153,7 @@ def run_result(aborted: bool, files_downloaded: list, pause_outcome=None) -> str
     if aborted:
         return "failure"
     if not files_downloaded:
-        return "failure"
+        return "success" if known_source_count > 0 else "failure"
     if not all(entry["result"] == "success" for entry in files_downloaded):
         return "failure"
     return "success"
@@ -168,7 +170,8 @@ def _fresh_otp(bcs):
     run-start credential when the item has no TOTP or the fetch fails.
     """
     try:
-        totp_item = get_totp(f"{bcs.api_url}/object/totp/{bcs.vault_item_name}")
+        item = getattr(bcs, "vault_item_id", None) or bcs.vault_item_name
+        totp_item = get_totp(f"{bcs.api_url}/object/totp/{item}")
     except VaultAPIError as e:
         logger.warning("OTP re-fetch failed (%s); using run-start credential",
                        failure_record("get_totp", e))
@@ -194,6 +197,7 @@ class _RunContext:
         self.debug = debug
         self.eof_noticed = False
         self.files_downloaded = []
+        self.incremental_known_count = 0
         self.collection_filenames = set()
         self.collection_completed_keys = {}
         self.context = None
@@ -209,6 +213,7 @@ class _RunContext:
         # Extra attributes used by _fresh_otp at substitution time.
         self.bcs.api_url = api_url
         self.bcs.vault_item_name = f"{task['service']} {task['user']}".strip()
+        self.bcs.vault_item_id = credentials.get("item_id")
         self.bcs.otp_fallback = credentials["otp"]
         # Pause state (C5): the pause loop and the Copilot context handler
         # read these off the context.
@@ -539,12 +544,15 @@ def _collection_actions(ctx, step=None):
         return record
 
     def download(locator, options):
+        known_count = 0
         if isinstance(options, dict) and options.get("incremental") is True:
             prefix = collection.source_key(options.get("key_attribute"), "")
             completed_keys.update(
                 key[len(prefix):] for key in ctx.db.known_source_keys(ctx.task["id"])
                 if key.startswith(prefix))
-        return collection.download_all(
+            known_count = sum(key in completed_keys for key in
+                              collection._snapshot(locator, options.get("key_attribute")))
+        records = collection.download_all(
             ctx.page,
             ctx.context,
             locator,
@@ -553,6 +561,8 @@ def _collection_actions(ctx, step=None):
             completed_keys=completed_keys,
             keyed_save=True,
         )
+        ctx.incremental_known_count = getattr(ctx, "incremental_known_count", 0) + known_count
+        return records
 
     def replacement_calendar(root, options):
         from .calendar import collect_calendar
@@ -1099,7 +1109,8 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
                 ctx = _RunContext(task, run_id, db, debug, credentials, api_url)
                 ctx.bcs.date_context = dates
                 files, aborted, pause_outcome = _run_recipe(ctx, recipe)
-                result = run_result(aborted, files, pause_outcome)
+                result = run_result(aborted, files, pause_outcome,
+                                    known_source_count=ctx.incremental_known_count)
             except RunInterrupted:
                 # A shutdown signal (SIGTERM/SIGINT) reached the run: the
                 # teardown below reaps the display stack and finalizes the

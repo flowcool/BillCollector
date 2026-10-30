@@ -188,6 +188,7 @@ def fetch_credentials(api_url, service, user):
         raise VaultAPIError("Invalid vault item response") from None
     totp_item = get_totp(f"{api_url}/object/totp/{item_id}")
     return {
+        "item_id": item_id,
         "user": get_json_property_value(item, "data_login_username"),
         "password": get_json_property_value(item, "data_login_password"),
         "otp": get_json_property_value(totp_item, "data_data") if totp_item is not None else None,

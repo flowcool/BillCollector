@@ -19,6 +19,7 @@ def test_case_variants_resolve_exact_id_and_totp_by_id():
             response({"data": [{"id": "other-id", "name": "CC genevois"}, chosen]}),
             response(detail)]) as get, mock.patch.object(vault, "get_totp", return_value=None) as totp:
         result = vault.fetch_credentials("http://127.0.0.1:8087", "CC", "Genevois")
+    assert result["item_id"] == "exact-id"
     assert result["user"] == "synthetic-user"
     assert result["password"] == "synthetic-password"
     assert result["otp"] is None
@@ -49,3 +50,13 @@ def test_changed_item_identity_is_rejected():
         with pytest.raises(vault.VaultAPIError):
             vault.fetch_credentials("http://127.0.0.1:8087", "CC", "Genevois")
     totp.assert_not_called()
+
+
+def test_fresh_totp_uses_exact_id_after_initial_lookup():
+    from types import SimpleNamespace
+    from billcollector import runner
+    bcs = SimpleNamespace(api_url="http://127.0.0.1:8087", vault_item_id="exact-id",
+                          vault_item_name="CC Genevois", otp_fallback=None)
+    with mock.patch.object(runner, "get_totp", return_value=response({"data":"synthetic-otp"})) as get:
+        assert runner._fresh_otp(bcs) == "synthetic-otp"
+    get.assert_called_once_with("http://127.0.0.1:8087/object/totp/exact-id")

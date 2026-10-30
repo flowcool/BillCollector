@@ -800,7 +800,7 @@ services:
             }
         ) as track, mock.patch.object(
             runner.collection, "download_all", side_effect=exercise
-        ):
+        ), mock.patch.object(runner.collection, "_snapshot", return_value=["a", "new"]):
             actions = runner._collection_actions(ctx)
             options = {
                 "key_attribute": "href", "max_items": 2,
@@ -842,7 +842,7 @@ services:
             }
         ) as track, mock.patch.object(
             runner.collection, "download_all", side_effect=exercise
-        ):
+        ), mock.patch.object(runner.collection, "_snapshot", return_value=["a", "new"]):
             runner._collection_actions(ctx)["download_all"](object(), {
                 "key_attribute": "href", "max_items": 2, "timeout_ms": 10,
                 "event_window_ms": 2, "incremental": True,
