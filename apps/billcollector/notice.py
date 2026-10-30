@@ -154,8 +154,14 @@ def _revision_digest(path):
             digest.update(len(data).to_bytes(8, "big"))
             digest.update(data)
 
-        def visit(value, depth=0):
-            nonlocal nodes
+        # Direct nesting and graph length have independent limits. Use an
+        # explicit DFS stack so linked pages and outlines do not recurse.
+        pending = [("visit", reader.trailer, 0)]
+        while pending:
+            action, value, depth = pending.pop()
+            if action == "emit":
+                emit(value)
+                continue
             nodes += 1
             if nodes > 100000 or depth > 100:
                 raise ValueError
@@ -163,10 +169,10 @@ def _revision_digest(path):
                 key = (value.idnum, value.generation)
                 if key in seen:
                     emit(b"ref" + str(seen[key]).encode())
-                    return
+                    continue
                 seen[key] = len(seen)
                 emit(b"object")
-                visit(value.get_object(), depth + 1)
+                pending.append(("visit", value.get_object(), 0))
             elif isinstance(value, DictionaryObject):
                 emit(b"stream" if isinstance(value, StreamObject) else b"dict")
                 omitted = {"/CreationDate", "/ModDate"} if value is info else set()
@@ -174,25 +180,24 @@ def _revision_digest(path):
                     omitted |= {"/ID", "/Size", "/Prev", "/XRefStm"}
                 if isinstance(value, StreamObject):
                     omitted |= {"/Length"}
-                for key in sorted(value):
+                pending.append(("emit", b"end", 0))
+                if isinstance(value, StreamObject):
+                    pending.append(("emit", value._data, 0))
+                for key in reversed(sorted(value)):
                     if key not in omitted:
-                        emit(str(key).encode())
                         item = value.raw_get(key)
                         if (alias is not None and isinstance(item, TextStringObject)
                                 and str(item) == alias
                                 and (key == "/Dest" or
                                      (key == "/D" and value.get("/S") == "/GoTo"))):
-                            emit(b"generated-destination-alias")
+                            pending.append(("emit", b"generated-destination-alias", 0))
                         else:
-                            visit(item, depth + 1)
-                if isinstance(value, StreamObject):
-                    emit(value._data)
-                emit(b"end")
+                            pending.append(("visit", item, depth + 1))
+                        pending.append(("emit", str(key).encode(), 0))
             elif isinstance(value, ArrayObject):
                 emit(b"array")
-                for item in value:
-                    visit(item, depth + 1)
-                emit(b"end")
+                pending.append(("emit", b"end", 0))
+                pending.extend(("visit", item, depth + 1) for item in reversed(value))
             elif isinstance(value, PdfObject):
                 if id(value) in aliases:
                     emit(b"generated-destination-alias")
@@ -203,7 +208,6 @@ def _revision_digest(path):
             else:
                 raise ValueError
 
-        visit(reader.trailer)
         return digest.hexdigest()
     except Exception:
         raise ValueError("cannot establish a notice PDF revision") from None

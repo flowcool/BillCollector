@@ -5,7 +5,9 @@ For Infra folder delivery and qualification, use the
 describe engine internals; the shipped registry is empty and has no Settings/env
 configuration interface.
 
-This is a local fork extension. Upstream issue #38 remains a separate agreement.
+Upstream issue #38 ships the opt-in collector identity contract on public main
+`e83c8e2`. Archive receipts and the fork-specific Bourse Direct delivery policy
+remain separate interfaces.
 The collector owns repeat suppression. Paperless owns archive storage. A download
 record is not an archive receipt. The local integration uses the selected engine
 publication journal. Bourse Direct selects the strict delivery policy below.
@@ -76,7 +78,8 @@ Default collection steps retain their existing collision guard.
 
 Encrypted, empty, oversized (>20 MiB), malformed or unsupported PDFs fail the
 step without a revision record or publication. Traversal stops at 100,000 nodes
-or depth 100. Parser diagnostics are suppressed and warnings reject identity.
+or direct-object depth 100. Indirect references reset the direct-depth count;
+linked pages and outlines do not consume the direct-nesting budget. Parser diagnostics are suppressed and warnings reject identity.
 The parser does not decode content streams. The existing runner failure/pause
 contract applies; there is no text-only fallback.
 

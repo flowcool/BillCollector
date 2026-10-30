@@ -86,7 +86,7 @@ Every release and Infra handoff states the SHA-256 of
 `apps/recipes_playwright/recipe-pw-schema.yaml`. This candidate's schema is:
 
 ```text
-2ca6cda5015d6645c8402b04482b005ee6c310faa47ec25044eabe3448344d39
+1d3b111472c6fdfaab9860fe1ee28d6c255105c69de8281902eefcef631e70f2
 ```
 
 Calculate it from the exact candidate with
@@ -109,8 +109,9 @@ The current migrations add missing columns after `PRAGMA table_info` checks:
 Adding `login_cycle_active` also initializes it conservatively for prior login
 attempt/lock state or a limit of one. Historical download state defaults to
 `consumed`; adding columns does not prove archive delivery or populate source keys.
-This documentation release adds no migration. Compare `db.py` with the previously
-deployed revision for each later release; list additions, backfills, defaults and
+This upstream synchronization adds no DB migration. The schema descriptions
+now state that notice identity is daemon-only; the option set is unchanged.
+Compare `db.py` with the previously deployed revision for each later release; list additions, backfills, defaults and
 compatibility limits in its handoff. Reuse the same DB and Task ids for dedup.
 Do not seed history from filenames, Paperless or another collector implicitly.
 

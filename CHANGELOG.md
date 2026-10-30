@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Align notice identity with public upstream `e83c8e2`: use iterative PDF graph
+  traversal and validate source identity before writing staged bytes. Preserve
+  the fork's Bourse Direct, incremental and strict-delivery interfaces.
+
 - Numeric cron weekdays now use cron numbering (`0`/`7` Sunday, `1` Monday).
   Review numeric schedules before upgrading. The stricter parser rejects legacy
   forms `1/2`, `mon-5`, `01` and `*/02`; use explicit named days or unpadded
