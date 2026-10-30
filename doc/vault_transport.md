@@ -7,6 +7,8 @@ for each attempt and the connection uses a vetted numeric address. HTTP defaults
 to port 80 when no port is specified. URL credentials, fragments, HTTPS and
 public targets are refused before a request is made. Request paths and query strings are preserved when the local
 authority is pinned, including `/list/object/items?search=<encoded-name>`.
+The configured base API URL must remain query-free; preflight and Settings
+validation reject queries before DNS resolution.
 
 Requests ignore ambient proxy configuration and refuse redirects. The HTTP Host
 header defaults to the configured API host/port; `BW_API_HOST` optionally overrides

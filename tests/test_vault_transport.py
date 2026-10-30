@@ -60,11 +60,23 @@ class VaultTransportTests(unittest.TestCase):
         for url in (None, "https://bw.local/status", "http://user:password@bw.local/",
                     "http://bw.local:0/", "http://bw.local:99999/", "http://@bw.local/",
                     "http://user@bw.local/", "http://bw.local:invalid/",
+                    "http://bw.local/?token=synthetic",
                     "http://bw.local/#synthetic", "file:///synthetic", "not-a-url"):
             with self.subTest(url=url), patch.object(transport.socket, "getaddrinfo") as resolve:
                 with self.assertRaises(transport.VaultTransportError):
                     transport.pinned_api_url(url)
                 resolve.assert_not_called()
+
+    def test_request_query_does_not_bypass_authority_or_fragment_checks(self):
+        for url in ("https://bw.local/list?search=x", "http://user@bw.local/list?search=x",
+                    "http://bw.local:0/list?search=x", "http://bw.local/list?search=x#fragment"):
+            with self.subTest(url=url), patch.object(transport.socket, "getaddrinfo") as resolve:
+                with self.assertRaises(transport.VaultTransportError):
+                    transport.pinned_api_urls(url)
+                resolve.assert_not_called()
+        with patch.object(transport.socket, "getaddrinfo", return_value=dns("8.8.8.8")):
+            with self.assertRaises(transport.VaultTransportError):
+                transport.pinned_api_urls("http://public.invalid/list?search=x")
 
     def test_dns_failure_is_a_bounded_configuration_error(self):
         with patch.object(transport.socket, "getaddrinfo", side_effect=OSError("SYNTHETIC_PRIVATE_MARKER")):

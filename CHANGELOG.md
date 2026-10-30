@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Daemon vault lookup accepts the encoded search query through the pinned HTTP
+  transport. Configured base API URLs still reject queries. Local-network,
+  userinfo, port and fragment checks remain enforced.
+
 ### Changed
 
 - Numeric cron weekdays now use cron numbering (`0`/`7` Sunday, `1` Monday).
