@@ -22,11 +22,11 @@ class VaultTransportError(ValueError):
 
 
 def pinned_api_urls(url):
-    """Return all vetted numeric local targets and the original Host header."""
+    """Vet the HTTP authority, preserving the request path and query when pinning."""
     try:
         parsed = urlsplit(url)
         if (parsed.scheme != "http" or not parsed.hostname or parsed.username is not None
-                or parsed.password is not None or parsed.query or parsed.fragment):
+                or parsed.password is not None or parsed.fragment):
             raise ValueError("invalid API URL")
         port = parsed.port if parsed.port is not None else 80
         if port == 0:
