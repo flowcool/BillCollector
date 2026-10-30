@@ -3,6 +3,9 @@ name: Playwright assurance
 on:
   pull_request:
     branches: [main, playwright-next]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   push:
     branches: [main, playwright-next, "integration/**"]
     tags: ["v*", "playwright-v*"]
