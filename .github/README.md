@@ -2,7 +2,7 @@
 
 Dependabot groups weekly Python and GitHub Actions updates. Security alerts and
 security-update pull requests are enabled in repository settings. Merges remain
-manual; a green dependency update is evidence to review, not an automatic release.
+manual; merging a validated dependency update publishes a commit-tagged image.
 
 The Playwright assurance workflow runs on pull requests, maintained-branch pushes,
 release tags, manual dispatch and a weekly schedule. It checks unit tests, a
@@ -19,8 +19,9 @@ rejects fixable HIGH/CRITICAL vulnerabilities; unresolved lower-severity and
 unfixed findings remain visible for review. Scanner success does not establish
 that an application is vulnerability-free.
 
-Only release-tag runs and explicit manual requests from the default branch can
-publish. The publishing job waits for every validation job and verifies that the
+Release-tag pushes, pushes to the default branch, and opted-in manual requests
+from the default branch can publish. Default-branch pushes publish only the
+`sha-<short>` tag. No floating tag is published. The publishing job waits for every validation job and verifies that the
 commit is already integrated into the default branch. It publishes the exact
 scanned image through a one-day internal workflow artifact, without rebuilding.
 Ordinary PR and scheduled runs do not store image archives or publish packages.
