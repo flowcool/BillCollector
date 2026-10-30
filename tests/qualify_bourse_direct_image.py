@@ -28,7 +28,7 @@ shutil.copytree('/apps/recipes_playwright', root/'apps/recipes_playwright')
 hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()
           for name in ('billcollector/bourse_direct.py', 'billcollector/notice.py',
                        'billcollector/downloads.py', 'billcollector/runner.py',
-                       'recipes_playwright/recipe-pw__boursedirect.yaml')}
+                       'recipes_playwright/recipe-pw-schema.yaml')}
 print(json.dumps({'packaged_source_sha256':hashes, 'uid':os.getuid(),
                   'gid':os.getgid(), 'pypdf':pypdf.__version__}), flush=True)
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/apps/browser'
@@ -37,7 +37,8 @@ os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
 sys.path.insert(0, '/test-deps')
 import pytest
 code = pytest.main([str(root/'tests/test_bourse_direct.py'),
-                    str(root/'tests/test_notice_identity.py'), '-q',
+                    str(root/'tests/test_notice_identity.py'),
+                    str(root/'tests/test_throttle.py'), '-q',
                     '--basetemp', str(root/'pytest-proof')])
 if code:
     sys.exit(code)
@@ -78,7 +79,7 @@ def main():
                                      capture_output=True, text=True).stdout)[0]
     if image['Config']['Labels']['org.opencontainers.image.revision'] != revision:
         raise ValueError('Image revision differs from the selected engine')
-    command = ['docker', 'create', '--name', args.container_name, '-i',
+    command = ['docker', 'create', '--name', args.container_name, '-i', '--user', '1003:1000',
                '--network', 'none', '--shm-size', '256m',
                '--security-opt', f'seccomp={engine}/docker/chromium-seccomp.json',
                '--mount', f'type=bind,src={engine}/tests,dst=/checks/tests,readonly',
@@ -94,7 +95,7 @@ def main():
     hashes = {name: hashlib.sha256((engine/'apps'/name).read_bytes()).hexdigest()
               for name in ('billcollector/bourse_direct.py', 'billcollector/notice.py',
                            'billcollector/downloads.py', 'billcollector/runner.py',
-                           'recipes_playwright/recipe-pw__boursedirect.yaml')}
+                           'recipes_playwright/recipe-pw-schema.yaml')}
     log_text = (root/'container.log').read_text()
     packaged = next((json.loads(line)['packaged_source_sha256'] for line in log_text.splitlines()
                      if line.startswith('{"packaged_source_sha256"')), None)

@@ -5,17 +5,15 @@ the browser's authenticated request context reads the offered HTML/PDF chain.
 The ordinary tracker retains untouched originals and applies notice revisions.
 """
 from datetime import date
-import fcntl
 import hashlib
-from html.parser import HTMLParser
 import json
-import os
+from html.parser import HTMLParser
 from pathlib import Path
 import re
 import time
 from urllib.parse import parse_qs, urljoin, urlsplit
 
-from . import config
+from .throttle import request_interval, wait_for_request
 from .notice import source_digest
 from .collection import CollectionError
 from .interrupt import RunInterrupted
@@ -82,31 +80,6 @@ def validate_options(options):
     for name, maximum in [('max_months', 120), ('max_items', 200), ('timeout_ms', 7_200_000)]:
         if type(options[name]) is not int or not 1 <= options[name] <= maximum:
             raise SourceError('Bourse Direct bounds are invalid')
-
-
-def _rate_limit(page, remaining):
-    """One shared instance gate for login transactions and original-PDF reads."""
-    config.RUN_DIR.mkdir(parents=True, exist_ok=True)
-    with open(config.RUN_DIR / 'bourse-direct-rate.lock', 'a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        path = config.RUN_DIR / 'bourse-direct-rate.json'
-        last = json.loads(path.read_text())['at'] if path.exists() else 0
-        wait = max(0, last + 60 - time.time())
-        if wait * 1000 >= remaining():
-            raise SourceError('Bourse Direct rate wait exceeds the remaining deadline')
-        if wait:
-            page.wait_for_timeout(wait * 1000)
-        temporary = path.with_suffix('.pending')
-        with temporary.open('w') as stream:
-            json.dump({'at': time.time()}, stream)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        descriptor = os.open(config.RUN_DIR, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
 
 
 def _target(base, relative, *, account, period, pdf=False):
@@ -191,6 +164,8 @@ def collect(ctx, options, save_download, resolve):
     """One bounded, single-attempt source transaction; never automatic resubmission."""
     validate_options(options)
     page, context, db = ctx.page, ctx.context, ctx.db
+    login_interval = request_interval(db, "login", default=60, minimum=60)
+    document_interval = request_interval(db, "document", default=5)
     task_id, run_id = ctx.task['id'], ctx.run_id
     dates = ctx.bcs.date_context
     start = dates.date_from.year * 12 + dates.date_from.month - 1
@@ -250,7 +225,8 @@ def collect(ctx, options, save_download, resolve):
             task = db.get_task(task_id)
             if task['login_failures'] or task['login_pending_run_id']:
                 raise SourceError('Bourse Direct login needs operator verification before another attempt')
-            _rate_limit(page, remaining)
+            wait_for_request(page, remaining, namespace="bourse-direct-rate",
+                             interval=login_interval)
             if not db.reserve_login_attempt(task_id, run_id, 2):
                 raise SourceError('Bourse Direct login budget refused the attempt')
             reserved = True
@@ -330,7 +306,8 @@ def collect(ctx, options, save_download, resolve):
                     pdf_query[field] = [str(int(pdf_query[field][0]))]
                 if pdf_day != day or pdf_query != dict(original_query, pdf=['1']):
                     raise SourceError('Bourse Direct original PDF identity changed')
-                _rate_limit(page, remaining)
+                wait_for_request(page, remaining, namespace="bourse-direct-document-rate",
+                                 interval=document_interval)
                 db.set_setting(pending_key, source_digest(pdf_url, POLICY))
                 body = _read(context, pdf_url, remaining, pdf=True)
                 save_download(Original(body, pdf_url, options['account_type'], day))
@@ -363,6 +340,29 @@ def validate_recipe(recipe):
     if 'bourse_direct' in names and (names.count('bourse_direct') != 1
                                     or len(recipe['services']) != 1 or 'login' in names):
         raise ValueError('Bourse Direct requires one service and one source action without another login block')
+
+
+def collection_dates(recipe, dates, *, explicit_start=False):
+    """All uses the recipe history bound; incremental keeps the task window.
+
+    A supplied recovery start always wins. Calendar drift is still refused by
+    collection; this does not claim that older periods exist on the provider.
+    """
+    from .variables import DateContext
+
+    actions = [entry for service in recipe.get('services', [])
+               for step in service.get('steps', []) for entry in step.get('methods', [])
+               if entry.get('method') == 'bourse_direct']
+    if not actions:
+        return dates
+    options = actions[0]['arguments'][0]
+    validate_options(options)
+    if explicit_start or options.get('incremental', False):
+        return dates
+    index = dates.today.year * 12 + dates.today.month - options['max_months']
+    if index < 12:
+        raise ValueError('Collection history date is outside the supported range')
+    return DateContext(dates.today, date(index // 12, index % 12 + 1, 1))
 
 
 def select_mode(recipe, mode):

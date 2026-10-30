@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Separate durable login and document request pacing via generic engine gates. Preserve the Bourse Direct 60-second login floor; configure document pacing through Settings (default 5 seconds). No DB or recipe schema change.
+
+
 ### Changed
 
 - Align notice identity with public upstream `e83c8e2`: use iterative PDF graph

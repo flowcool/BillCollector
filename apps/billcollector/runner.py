@@ -1089,6 +1089,8 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None, collection_m
 
         try:
             dates = DateContext.capture(task["date_window_days"], date_from)
+            from .bourse_direct import collection_dates
+            dates = collection_dates(recipe, dates, explicit_start=date_from is not None)
             validate_variable_recipe(recipe, dates)
         except ValueError as e:
             print(f"runner: invalid variable contract: {e}", file=sys.stderr)
