@@ -328,6 +328,9 @@ def track_download(download, run_id, task, db, *, source_key=None, unpack=None, 
             filename = "download"
         if filename == ".billcollector":
             raise ValueError("Download filename conflicts with publication state")
+        source_identity = None
+        if identity is not None:
+            source_identity = notice.source_digest(str(download.url), identity)
         root = _journal_root(target, db)
         root.mkdir(parents=True, exist_ok=True)
         entry = root / uuid4().hex
@@ -354,7 +357,7 @@ def track_download(download, run_id, task, db, *, source_key=None, unpack=None, 
             "source_key": source_key, "delivery_policy": delivery_policy,
         }
         if identity is not None:
-            record['source_identity'] = notice.source_digest(str(download.url), identity)
+            record['source_identity'] = source_identity
             record['revision_sha256'] = notice.revision_digest(staged)
             existing = db.find_notice_revision(task['id'], record['source_identity'],
                                                record['revision_sha256'])

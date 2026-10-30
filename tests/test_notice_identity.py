@@ -135,6 +135,9 @@ def test_missing_or_ambiguous_source_and_bad_pdf_do_not_publish(tmp_path, monkey
         with pytest.raises(ValueError) as caught:
             downloads.track_download(source, db.create_run(task), db.get_task(task), db, identity=POLICY)
         assert "SECRET" not in str(caught.value)
+        if source.path == valid:
+            assert not list((tmp_path / "out").rglob("manifest.json"))
+            assert not list((tmp_path / "out").rglob("document"))
     assert "SECRET" not in caplog.text
     assert not db.list_downloads(task_id=task)
     assert not list((tmp_path / "out").glob("*.pdf"))
@@ -304,3 +307,43 @@ def test_generic_notice_identity_keeps_generic_consumer_recovery(tmp_path, monke
     assert len(calls) == 2
     assert db.list_downloads(task_id=task)[0]['state'] == 'consumed'
     db.close()
+
+
+def test_long_linked_pdf_graphs_are_not_direct_nesting(tmp_path):
+    from pypdf.annotations import Link
+    from billcollector.notice import revision_digest
+
+    for kind in ("outlines", "links"):
+        paths = []
+        for generation in ("one", "two"):
+            writer = PdfWriter()
+            for _ in range(20 if kind == "links" else 1):
+                writer.add_blank_page(width=100, height=100)
+            if kind == "outlines":
+                for i in range(60):
+                    writer.add_outline_item(f"Section {i}", 0)
+            else:
+                for i in range(19):
+                    writer.add_annotation(i, Link(rect=(0, 0, 10, 10), target_page_index=i + 1))
+            writer.add_metadata({"/CreationDate": generation})
+            path = tmp_path / f"{kind}-{generation}.pdf"
+            writer.write(path)
+            paths.append(path)
+        assert revision_digest(paths[0]) == revision_digest(paths[1])
+
+
+def test_deep_direct_pdf_nesting_is_still_refused(tmp_path):
+    import pytest
+    from pypdf.generic import DictionaryObject, NumberObject
+    from billcollector.notice import revision_digest
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    value = NumberObject(1)
+    for _ in range(110):
+        value = DictionaryObject({NameObject("/Nested"): value})
+    writer.root_object[NameObject("/Synthetic")] = value
+    path = tmp_path / "deep.pdf"
+    writer.write(path)
+    with pytest.raises(ValueError, match="cannot establish"):
+        revision_digest(path)

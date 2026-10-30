@@ -46,6 +46,7 @@ definitions:
       description:
         type: string
       notice_identity:
+        description: Daemon-only notice identity; unsupported by the legacy batch runner.
         $ref: "#/definitions/noticeIdentity"
       graceful:
         type: boolean
@@ -113,6 +114,7 @@ definitions:
       description:
         type: string
       notice_identity:
+        description: Daemon-only notice identity; unsupported by the legacy batch runner.
         $ref: "#/definitions/noticeIdentity"
       graceful:
         type: boolean
