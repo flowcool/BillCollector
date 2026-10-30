@@ -331,6 +331,7 @@ The BillCollector configuration for each web service from which you want to retr
      - Downloads: a step with the `expect_download` method wraps the nested `steps` that trigger the download; the file is saved into the Downloads folder. A re-downloaded file that is byte-identical to one already tracked for the same task (same sha256) is recorded as a duplicate and the consumer hook is not re-run for it.
      - Bounded pagination: use one page locator followed by `click_until_absent`. Its single options object requires `progress_selector`, `max_clicks`, and `timeout_ms`. `timeout_ms` is the total browser-action budget. Every click must increase the visible progress count or make the pager absent or hidden. This action supports cumulative "load more" controls. It rejects page-replacement pagination and virtualized lists because their visible item count does not increase. For monthly replacement calendars, use the daemon's [replacement_calendar action](doc/REPLACEMENT_CALENDARS.md).
      - Bounded collections: use one page locator followed by `download_all`. Its single options object requires `key_attribute`, `max_items`, `timeout_ms`, and `event_window_ms`. `timeout_ms` bounds the browser actions and observations for the whole collection. Persistence (`save_as`, hashing, consumers, and SQLite) remains synchronous and cannot be preempted by that browser deadline. `event_window_ms` is the full attribution window observed after each click, so `timeout_ms` must exceed the actual item count multiplied by `event_window_ms`, with additional time for browser actions. The engine reports the required and remaining budgets before its first click when the minimum attribution-window budget cannot fit. The key must be non-empty and unique for every item. The ordered key set must remain stable while each control produces exactly one download. `download_all` also rejects a suggested filename already saved earlier in the run instead of overwriting it.
+     - Incremental collections: `"incremental": true` in the `download_all` options records each item key (`<key_attribute>=<key>`) with its download. Later runs of the same task skip known keys without clicking them, so only the first run collects everything. Use it only with a key that is stable per document across sessions (for example an invoice number); a constant or session-bound key misses or repeats documents. `"unpack": "pdf"` publishes the single PDF member of a ZIP download unchanged under its member name and deduplicates on the PDF; any other archive content fails without publication. Both options require the daemon runner.
      - Collection actions are terminal steps. They cannot be nested below `expect_download` or use `graceful: true`. Their explicit bounds prevent silent truncation and automatic retry after partial side effects. An operator-requested resume of `download_all` skips the stable item keys already persisted by that step and processes only the remaining items.
      - Variables: `{{USERNAME}}`, `{{PASSWORD}}` and `{{OTP}}` (all three from Vaultwarden, linked to the web service) are substituted at run time.
      - **Daemon date variables** (issue #26): `{{TODAY}}`, `{{DATE_TO}}`,
@@ -550,3 +551,19 @@ To contribute code, see [Contributing](#contributing).
 ## What's Next
 
 The self-hosted daemon with its web UI is now the primary mode: per-task scheduling, live supervision, pause-and-step-in, a first-start onboarding wizard, and a Docker Compose package to stand it up. The cron-driven batch system is deprecated but keeps running unchanged alongside it as the rollback path. The recorded step data and the machine-readable pause context are the foundation for the planned self-healing / assisted-repair features: when a portal changes, BillCollector pauses, shows what it found, and - with your help or on its own - adapts the recipe. See [CHANGELOG.md](CHANGELOG.md) for the history of feature updates and changes.
+
+### Incremental document collection
+
+The daemon supports opt-in `incremental: true` in `download_all`. It stores
+`<key_attribute>=<key>` per task in the additive nullable `Download.source_key`
+column. Later runs do not click committed keys for the same attribute. Existing
+recipes remain non-incremental. Use a stable per-document identity, never a
+session URL or a constant download-all button ID. A changed document with the
+same key is not revisited; correction handling remains a separate contract.
+
+`unpack: pdf` accepts a ZIP with exactly one plain PDF file member, at most
+128 archive entries and 100 MiB compressed/uncompressed data. Unsafe paths,
+special files and invalid PDFs fail before publication. The member bytes are
+published unchanged, including a possible UTF-8 BOM; hashing and dedup use those
+original bytes. The ZIP is never published. Both options require the daemon
+runner; the legacy batch adapter rejects them.

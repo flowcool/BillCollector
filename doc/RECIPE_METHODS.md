@@ -216,6 +216,8 @@ Arguments: exactly one object:
 | `max_items` | integer 1..200 | yes |
 | `timeout_ms` | integer 1..600000 | yes |
 | `event_window_ms` | integer 1..10000, and < `timeout_ms` | yes |
+| `incremental` | boolean; default false; daemon only | no |
+| `unpack` | `"pdf"`; daemon only | no |
 
 Semantics: the initial ordered key snapshot is the contract for the
 whole action; the list is re-read after every click and the selected
@@ -225,6 +227,15 @@ click within the event window; popups are captured and closed; the
 listing is restored after a navigating download. Persisted records stay
 committed when a later item fails. Non-graceful, single attempt, cannot
 be nested.
+
+With `incremental: true`, use stable document identities, not session URLs or
+constant bulk buttons. The daemon skips committed keys for the same task and
+key attribute. A successful all-known collection yields a successful no-op run;
+a generic empty recipe/list does not. Existing keys are not revisited for
+corrections. With `unpack: pdf`, require one plain PDF member in the ZIP and
+publish its exact bytes, retaining any UTF-8 BOM. Unsafe paths/special entries,
+multiple files and size/count violations fail closed. Both options are rejected
+by the legacy batch adapter. See [bounds and storage](../README.md#incremental-document-collection).
 
 ## 4. Variables
 

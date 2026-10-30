@@ -787,7 +787,7 @@ services:
         completed_sets = []
 
         def exercise(_page, _context, _locator, save, _options,
-                     *, completed_keys):
+                     *, completed_keys, keyed_save):
             nonlocal calls
             calls += 1
             completed_sets.append(completed_keys)
@@ -800,7 +800,7 @@ services:
             }
         ) as track, mock.patch.object(
             runner.collection, "download_all", side_effect=exercise
-        ):
+        ), mock.patch.object(runner.collection, "_snapshot", return_value=["a", "new"]):
             actions = runner._collection_actions(ctx)
             options = {
                 "key_attribute": "href", "max_items": 2,
@@ -819,6 +819,52 @@ services:
             "suggested_filename": "invoice.pdf",
             "result": "success",
         }])
+
+    def test_daemon_adapter_seeds_known_keys_for_incremental_collection(self):
+        db = mock.Mock()
+        db.known_source_keys.return_value = {"href=a", "href=b", "id=c"}
+        ctx = SimpleNamespace(
+            page=object(), context=object(), collection_filenames=set(),
+            files_downloaded=[], run_id=7, task={"id": 3}, db=db,
+        )
+        seen = {}
+
+        def exercise(_page, _context, _locator, save, _options,
+                     *, completed_keys, keyed_save):
+            seen["keys"] = set(completed_keys)
+            seen["keyed"] = keyed_save
+            save(SimpleNamespace(suggested_filename="x.zip"),
+                 source_key="href=new", unpack="pdf")
+
+        with mock.patch.object(
+            runner.downloads, "track_download", return_value={
+                "url": "https://example.test/x", "filename": "x.pdf",
+            }
+        ) as track, mock.patch.object(
+            runner.collection, "download_all", side_effect=exercise
+        ), mock.patch.object(runner.collection, "_snapshot", return_value=["a", "new"]):
+            runner._collection_actions(ctx)["download_all"](object(), {
+                "key_attribute": "href", "max_items": 2, "timeout_ms": 10,
+                "event_window_ms": 2, "incremental": True,
+            })
+
+        db.known_source_keys.assert_called_once_with(3)
+        self.assertEqual(seen, {"keys": {"a", "b"}, "keyed": True})
+        self.assertEqual(track.call_args.kwargs,
+                         {"source_key": "href=new", "unpack": "pdf"})
+
+    def test_daemon_adapter_does_not_seed_keys_without_incremental(self):
+        db = mock.Mock()
+        ctx = SimpleNamespace(
+            page=object(), context=object(), collection_filenames=set(),
+            files_downloaded=[], run_id=7, task={"id": 3}, db=db,
+        )
+        with mock.patch.object(runner.collection, "download_all", return_value=[]):
+            runner._collection_actions(ctx)["download_all"](object(), {
+                "key_attribute": "href", "max_items": 2, "timeout_ms": 10,
+                "event_window_ms": 2,
+            })
+        db.known_source_keys.assert_not_called()
 
     def test_collection_action_rejects_an_earlier_side_effect(self):
         click = mock.Mock()

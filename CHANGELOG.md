@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `download_all` options `incremental` (persisted per-task source keys; later runs
+  skip known keys) and `unpack: pdf` (publish the single PDF member of a ZIP).
+  Downloads gain an additive `source_key` column.
 - Input-triggered protected login submissions (issue #36) and bounded
   replacement calendars (issue #37) are now integrated in public upstream.
   The fork retains its existing implementations.
@@ -229,6 +232,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   daemon web UI.
 
 ### Fixed
+
+- Completed incremental collections with only committed keys finish as success
+  without downloads. Empty recipes and aborted runs retain their failure result.
+  Substitution-time OTP refresh uses the resolved vault item ID too.
+
+
+- Resolve vault credentials and TOTP by ID after a unique exact-name search.
+  Case-variant names no longer make the CLI lookup ambiguous.
+- Start the scheduler paused and rebuild its loaded persistent jobstore before
+  resuming. Disabled or deleted tasks cannot fire from stale startup jobs.
+- Preserve original PDF bytes, including an optional UTF-8 BOM, during ZIP
+  extraction. Reject unsafe archive entries and bounded-size violations.
+
 
 - Helper imports preserve explicit `PLAYWRIGHT_BROWSERS_PATH`. Empty browser
   cache variables fall back to `BC_BROWSER_DIR`, then the bundled directory.
