@@ -9,10 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-- Separate durable login and document request pacing via generic engine gates. Preserve the Bourse Direct 60-second login floor; configure document pacing through Settings (default 5 seconds). No DB or recipe schema change.
-
-
 ### Changed
+
+- Separate durable login and document request pacing via generic engine gates. Preserve the Bourse Direct 60-second login floor; configure document pacing through Settings (default 5 seconds). No DB or recipe schema change.
+- Download All uses the recipe history limit; incremental collection keeps its
+  task date window. Install the Bourse Direct recipe from the recipe catalog.
+  The engine now includes a synthetic fixture only.
 
 - Align notice identity with public upstream `e83c8e2`: use iterative PDF graph
   traversal and validate source identity before writing staged bytes. Preserve

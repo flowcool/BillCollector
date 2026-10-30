@@ -43,7 +43,7 @@ Apply the shared [runtime contract](INFRA_RUNTIME_CONTRACT.md) before configurin
 Install the Bourse Direct recipe from `flowcool/billcollector-recipes`; the engine
 ships a synthetic test fixture only. One native task selects one offered account. `account_type` is `PEA` by default;
 `PEA-PME` is supported in isolated tests only. Set the task's `recipe_file` to
-`/apps/recipes_playwright/recipe-pw__boursedirect.yaml`. Use the same task ID for
+`/apps/recipes_playwright/recipe-pw__bourse_direct.yaml`. Use the same task ID for
 both actions. Do not create a second task or reset the database for Download All.
 
 The native vault item name is exactly `<task.service> <task.user>`, trimmed.

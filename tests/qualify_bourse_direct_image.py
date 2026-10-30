@@ -31,13 +31,12 @@ assert pypdf.__version__ == '6.21.2'
 shutil.copytree('/checks/tests', root/'tests')
 shutil.copytree('/apps/recipes_playwright', root/'apps/recipes_playwright')
 hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()
-          for name in ('billcollector/bourse_direct.py', 'billcollector/notice.py',
+          for name in ('billcollector/bourse_direct.py', 'billcollector/throttle.py', 'billcollector/notice.py',
                        'billcollector/downloads.py', 'billcollector/runner.py',
                        'recipes_playwright/recipe-pw-schema.yaml')}
 print(json.dumps({'packaged_source_sha256':hashes, 'uid':os.getuid(),
                   'gid':os.getgid(), 'pypdf':pypdf.__version__}), flush=True)
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/apps/browser'
-os.environ['BC_BROWSER_DIR'] = '/apps/browser'
 os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
 sys.path.insert(0, '/test-deps')
 import pytest
@@ -105,7 +104,7 @@ def main():
     state = json.loads(subprocess.run(['docker', 'inspect', container], check=True,
                                      capture_output=True, text=True).stdout)[0]
     hashes = {name: hashlib.sha256((engine/'apps'/name).read_bytes()).hexdigest()
-              for name in ('billcollector/bourse_direct.py', 'billcollector/notice.py',
+              for name in ('billcollector/bourse_direct.py', 'billcollector/throttle.py', 'billcollector/notice.py',
                            'billcollector/downloads.py', 'billcollector/runner.py',
                            'recipes_playwright/recipe-pw-schema.yaml')}
     log_text = (root/'container.log').read_text()
