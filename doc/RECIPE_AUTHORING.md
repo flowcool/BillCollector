@@ -105,8 +105,9 @@ For ordinary steps, three attempts can execute the full chain before a pause.
 Use it only for an optional control whose absence you have verified.
 
 The fork publishes distinct documents at unique paths in the configured
-download directory. A duplicate reuses its existing path. This does not prove
-crash-safe consumer delivery or archive receipt. Test with isolated files.
+download directory. A duplicate reuses its existing path. Crash recovery can
+replay pending consumer delivery with an at-least-once contract. A download
+result does not prove archive receipt. Test with isolated files.
 
 ## Test without a real account
 

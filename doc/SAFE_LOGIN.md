@@ -4,8 +4,9 @@ Candidate interface for [upstream issue #20](https://github.com/s-t-e-f-a-n/Bill
 This is a complete fork implementation candidate. Local proof and upstream
 contract acceptance are separate gates. It is not approved for deployment.
 The recipe and database interface were agreed in issue #20 (2026-10-22).
-The terminal-fill extension is implemented in this fork for issue #36.
-Upstream maintainer agreement is pending for that extension.
+The terminal-fill extension is implemented in this fork for issue #36 and
+integrated in public upstream through PR #39. Provider qualification and
+deployment remain separate.
 
 ## Candidate recipe
 

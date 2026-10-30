@@ -2,8 +2,9 @@
 
 This guide targets the daemon in `flowcool/BillCollector`, branch `playwright-next`.
 Use a fresh checkout and separate data directories for the first check.
-Runtime baseline: fork revision `cb43447` (2026-10-26), with dates and C3
-validation integrated. Recheck the limits after upgrading.
+Source baseline: the 2026-10-30 fork synchronization with public `f26b2a9`,
+with dates, C3 validation, recovery and calendars integrated. Recheck the limits
+after upgrading.
 [Limits and pending work](#limits-and-pending-work) identify what this guide
 cannot yet qualify for a permanent installation.
 
@@ -137,11 +138,12 @@ docker compose -p billcollector-local -f docker-compose.yml -f compose.local.yam
   The permanent recipe storage policy remains maintainer-owned (issue #27 F02).
 - The separate noVNC routing/authentication design remains maintainer-owned
   (issue #27 F03). This guide qualifies local UI access only.
-- Runtime date variables and pre-run method/argument validation are integrated
-  in this fork. Their upstream publication follows a separate schedule.
-- Durable crash recovery and consumer replay (upstream PR #33) are not yet
-  integrated here. Unique publication paths protect same-name documents, but
-  they do not make consumer delivery crash-safe.
+- Runtime dates are integrated in the fork and public upstream. Pre-run
+  method/argument validation (C3) is integrated in this fork; upstream PR #44
+  remains a separate integration boundary.
+- Durable crash recovery, collision-safe publication and consumer replay
+  (upstream PR #33) are integrated. Consumer delivery is at least once; a
+  completed download is not proof of an archive receipt.
 - The current runner can report `failure` when there are no documents. Keep
   the first check isolated from an existing document archive.
 

@@ -1,6 +1,9 @@
+> Documentation for issue #37. The action requires the daemon run-start
+> date context (issue #26); without it the action refuses execution.
+
 # Replacement calendars
 
-The fork's daemon supports `replacement_calendar`. Use this action when each
+The daemon supports `replacement_calendar`. Use this action when each
 previous-month click replaces the document list. Keep `click_until_absent` for
 cumulative lists. The legacy batch runner does not support calendar traversal.
 
@@ -82,7 +85,7 @@ normal per-task content deduplication still applies after persistence.
 
 ## Verification
 
-Install the fork's pinned runtime and development requirements, then install
+Install the pinned runtime and development requirements, then install
 the matching Chromium build. From the checkout root:
 
 ```bash
@@ -95,5 +98,5 @@ The calendar fixture fulfills all browser requests in memory. It uses a fresh
 browser context, temporary SQLite database, temporary files, and no consumers.
 It never contacts a broker, Bitwarden, Paperless, or a deployed service.
 
-This feature is a local fork implementation. It does not assert upstream
-interface agreement, provider qualification, or production deployment.
+Provider qualification of real portal calendars is not part of this
+integration; qualify the recipe selectors against the provider before real use.
