@@ -454,9 +454,15 @@ async def test_slow_login_notification_keeps_daemon_loop_responsive(db, path):
             else:
                 await orch.shutdown()
         assert finished.is_set()
-        assert len(worker_threads) == 1
-        assert worker_threads[0] != loop_thread
-        post.assert_called_once()
+        # Finalization and active orphan recovery now send a separate terminal
+        # interruption push as well as the login-lock transition push. Each
+        # must be sent once, and both transports must stay off the event loop.
+        terminal_push = path in ("finalize", "orphan")
+        assert len(worker_threads) == (2 if terminal_push else 1)
+        assert all(thread != loop_thread for thread in worker_threads)
+        titles = [call.kwargs["headers"]["Title"] for call in post.call_args_list]
+        assert titles.count("BillCollector: login blocked") == 1
+        assert titles.count("BillCollector: run needs attention") == int(terminal_push)
         assert not orch._notifications
 
 
