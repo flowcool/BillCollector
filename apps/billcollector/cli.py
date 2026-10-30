@@ -34,6 +34,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="execute one task run")
     p_run.add_argument("task_id", type=int, help="Task id to run")
+    p_run.add_argument("--collection-mode", choices=['all', 'incremental'],
+                       help="Bourse Direct action override; other providers are refused")
     p_run.add_argument("--debug", action="store_true", help="run in debug mode")
 
     p_run.add_argument("--date-from-stdin", action="store_true",
@@ -109,10 +111,11 @@ def main(argv=None) -> int:
         # Lazy import: Playwright is only needed when actually running a task.
         from . import runner
 
+        options = ({'collection_mode': args.collection_mode} if args.collection_mode else {})
         if args.date_from_stdin:
             return runner.run_task(args.task_id, args.debug,
-                                   date_from=sys.stdin.read(11))
-        return runner.run_task(args.task_id, args.debug)
+                                   date_from=sys.stdin.read(11), **options)
+        return runner.run_task(args.task_id, args.debug, **options)
 
     if args.command == "doctor":
         # Lazy import: requests is only needed for the offline doctor.

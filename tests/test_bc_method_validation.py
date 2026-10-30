@@ -139,7 +139,7 @@ def test_shipped_recipes_and_documented_login_candidate_validate():
 
     root = Path(__file__).resolve().parents[1]
     paths = sorted((root / 'apps/recipes_playwright').glob('recipe-pw__*.yaml'))
-    assert len(paths) == 15
+    assert len(paths) == 16
     for path in paths:
         ok, error, _ = validate_recipe(path.read_text())
         assert ok, (path.name, error)
