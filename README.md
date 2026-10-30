@@ -551,3 +551,19 @@ To contribute code, see [Contributing](#contributing).
 ## What's Next
 
 The self-hosted daemon with its web UI is now the primary mode: per-task scheduling, live supervision, pause-and-step-in, a first-start onboarding wizard, and a Docker Compose package to stand it up. The cron-driven batch system is deprecated but keeps running unchanged alongside it as the rollback path. The recorded step data and the machine-readable pause context are the foundation for the planned self-healing / assisted-repair features: when a portal changes, BillCollector pauses, shows what it found, and - with your help or on its own - adapts the recipe. See [CHANGELOG.md](CHANGELOG.md) for the history of feature updates and changes.
+
+### Incremental document collection
+
+The daemon supports opt-in `incremental: true` in `download_all`. It stores
+`<key_attribute>=<key>` per task in the additive nullable `Download.source_key`
+column. Later runs do not click committed keys for the same attribute. Existing
+recipes remain non-incremental. Use a stable per-document identity, never a
+session URL or a constant download-all button ID. A changed document with the
+same key is not revisited; correction handling remains a separate contract.
+
+`unpack: pdf` accepts a ZIP with exactly one plain PDF file member, at most
+128 archive entries and 100 MiB compressed/uncompressed data. Unsafe paths,
+special files and invalid PDFs fail before publication. The member bytes are
+published unchanged, including a possible UTF-8 BOM; hashing and dedup use those
+original bytes. The ZIP is never published. Both options require the daemon
+runner; the legacy batch adapter rejects them.

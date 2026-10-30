@@ -233,6 +233,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Resolve vault credentials and TOTP by ID after a unique exact-name search.
+  Case-variant names no longer make the CLI lookup ambiguous.
+- Start the scheduler paused and rebuild its loaded persistent jobstore before
+  resuming. Disabled or deleted tasks cannot fire from stale startup jobs.
+- Preserve original PDF bytes, including an optional UTF-8 BOM, during ZIP
+  extraction. Reject unsafe archive entries and bounded-size violations.
+
+
 - Helper imports preserve explicit `PLAYWRIGHT_BROWSERS_PATH`. Empty browser
   cache variables fall back to `BC_BROWSER_DIR`, then the bundled directory.
   With `BC_BROWSER_DIR` set, the legacy batch profile follows its `profile/`

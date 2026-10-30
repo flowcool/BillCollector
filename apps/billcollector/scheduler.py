@@ -75,8 +75,15 @@ class TaskScheduler:
 
     def start(self) -> None:
         """Re-sync all jobs from the Task table and start the scheduler."""
-        self.resync()
-        self._scheduler.start()
+        # Load the persistent jobstore without firing old jobs. Before start,
+        # get_jobs() exposes only pending jobs, not the persisted cache.
+        self._scheduler.start(paused=True)
+        try:
+            self.resync()
+        except Exception:
+            self._scheduler.shutdown(wait=False)
+            raise
+        self._scheduler.resume()
         logger.info("Scheduler started (%d job(s))",
                     len(self._scheduler.get_jobs()))
 
@@ -96,8 +103,7 @@ class TaskScheduler:
     def resync(self) -> None:
         """Rebuild the job table from the Task table (startup hook): drop
         every stored job and re-add one per enabled task with a cron."""
-        for job in list(self._scheduler.get_jobs()):
-            job.remove()
+        self._scheduler.remove_all_jobs()
         for task in self._db.list_tasks():
             self._add_job_for(task)
 

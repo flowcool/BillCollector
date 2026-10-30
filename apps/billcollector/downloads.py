@@ -12,12 +12,13 @@ import json
 import logging
 import os
 import sqlite3
+import stat
 # Fixed child interpreter/module, argument list, and no shell.
 import subprocess  # nosec B404
 import sys
 import zipfile
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from uuid import uuid4
 
 from . import config
@@ -57,17 +58,32 @@ def _unpack_pdf(staged):
     The member bytes are kept unchanged. Anything but exactly one regular PDF
     member with a plain name fails closed before any publication.
     """
+    if staged.stat().st_size > MAX_UNPACKED_BYTES:
+        raise ValueError("unpack: pdf archive exceeds the size limit")
     try:
         archive = zipfile.ZipFile(staged)
     except zipfile.BadZipFile as error:
         raise ValueError("unpack: pdf expects a ZIP download") from error
     with archive:
-        members = [m for m in archive.infolist() if not m.is_dir()]
+        entries = archive.infolist()
+        if len(entries) > 128:
+            raise ValueError("unpack: pdf archive has too many entries")
+        for entry in entries:
+            name = entry.orig_filename
+            mode = entry.external_attr >> 16
+            if ("\x00" in name or "\\" in name or PureWindowsPath(name).drive
+                    or PurePosixPath(name).is_absolute()
+                    or ".." in PurePosixPath(name).parts
+                    or stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)):
+                raise ValueError("unpack: pdf archive contains an unsafe member")
+        members = [m for m in entries if not m.is_dir()]
         if len(members) != 1:
             raise ValueError(f"unpack: pdf expects one file member, found {len(members)}")
         member = members[0]
         name = member.filename
         if (Path(name).name != name or name in ("", ".", "..", ".billcollector")
+                or len(os.fsencode(name)) > 255
+                or stat.S_IFMT(member.external_attr >> 16) not in (0, stat.S_IFREG)
                 or "\\" in name or not name.lower().endswith(".pdf")):
             raise ValueError("unpack: pdf member name is not a plain .pdf filename")
         if member.file_size > MAX_UNPACKED_BYTES:
@@ -83,7 +99,10 @@ def _unpack_pdf(staged):
             target.flush()
             os.fsync(target.fileno())
     with unpacked.open("rb") as stream:
-        if stream.read(5) != b"%PDF-":
+        # Some original portal PDFs carry a UTF-8 BOM. Recognize it without
+        # removing or otherwise transforming the original member bytes.
+        signature = stream.read(8)
+        if not (signature.startswith(b"%PDF-") or signature.startswith(b"\xef\xbb\xbf%PDF-")):
             unpacked.unlink()
             raise ValueError("unpack: pdf member is not a PDF document")
     os.replace(unpacked, staged)

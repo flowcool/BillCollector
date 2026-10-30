@@ -16,7 +16,9 @@ exit codes, the daemon runner records the run as failed).
 
 import json
 import logging
+import re
 import time
+from urllib.parse import quote
 
 import requests
 from flatten_json import flatten
@@ -164,8 +166,27 @@ def fetch_credentials(api_url, service, user):
     Raises VaultAPIError on any real failure.
     """
     item_name = f"{service} {user}".strip()
-    item = get_json(f"{api_url}/object/item/{item_name}")
-    totp_item = get_totp(f"{api_url}/object/totp/{item_name}")
+    try:
+        payload = json.loads(get_json(
+            f"{api_url}/list/object/items?search={quote(item_name, safe='')}"))
+        items = payload["data"]["data"]
+        if payload.get("success") is not True or not isinstance(items, list):
+            raise ValueError
+        matches = [item for item in items
+                   if isinstance(item, dict) and item.get("name") == item_name]
+        if len(matches) != 1:
+            raise VaultAPIError("Expected one exact vault item match")
+        item_id = matches[0]["id"]
+        if not isinstance(item_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item_id):
+            raise ValueError
+        item = get_json(f"{api_url}/object/item/{item_id}")
+        detail = json.loads(item)
+        if (detail.get("success") is not True or detail["data"].get("id") != item_id
+                or detail["data"].get("name") != item_name):
+            raise ValueError
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise VaultAPIError("Invalid vault item response") from None
+    totp_item = get_totp(f"{api_url}/object/totp/{item_id}")
     return {
         "user": get_json_property_value(item, "data_login_username"),
         "password": get_json_property_value(item, "data_login_password"),
