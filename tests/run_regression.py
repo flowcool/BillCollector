@@ -17,6 +17,11 @@ Without --vault, the local mock uses zero DOM settling, a 2 s action
 timeout and a 5 s navigation timeout. DOM capture and scenario checks still
 run. Runtime defaults and the optional --vault path keep their timing.
 
+Qualification boundary: legacy batch/mock-portal compatibility, not the daemon
+runner's exact task-name vault lookup or Infra folder delivery. The no-vault
+mode bypasses the live credential path; --vault still does not qualify daemon
+onboarding or Paperless. See doc/INFRA_RUNTIME_CONTRACT.md. Use isolated state.
+
 Usage (from the repo root):
     apps/.venv/bin/python tests/run_regression.py --ini tests/bc_regression.ini
         [--keep-downloads] [--port 8787] [--vault]

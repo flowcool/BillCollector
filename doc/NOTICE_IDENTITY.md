@@ -1,5 +1,10 @@
 # Notice identity and PDF revisions (fork contract)
 
+For Infra folder delivery and qualification, use the
+[shared runtime contract](INFRA_RUNTIME_CONTRACT.md). Consumer references below
+describe engine internals; the shipped registry is empty and has no Settings/env
+configuration interface.
+
 This is a local fork extension. Upstream issue #38 remains a separate agreement.
 The collector owns repeat suppression. Paperless owns archive storage. A download
 record is not an archive receipt. The local integration uses the selected engine

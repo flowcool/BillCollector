@@ -117,7 +117,9 @@ changing its schedule. Inspect the task and run pages:
 Open the expected document locally. Check its identity and content before
 configuring a schedule. File creation does not prove delivery to Paperless or
 another archive: the bundled consumer registry is empty. Configure and verify
-that downstream integration separately.
+that downstream integration separately. For the Infra deployment, use the
+[shared runtime contract](INFRA_RUNTIME_CONTRACT.md): global `download_dir` on
+the Paperless consume mount and the empty shipped consumer registry.
 
 For a credential-free check first, use the [synthetic recipe proof](RECIPE_AUTHORING.md#test-without-a-real-account).
 It proves recipe execution and downloads against loopback fixtures. It does not

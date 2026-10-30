@@ -1,4 +1,9 @@
-"""Run the sandbox check in one owned, isolated Docker container and retain proof."""
+"""Run the sandbox check in one owned, isolated Docker container and retain proof.
+
+Qualification boundary: sandbox and optional packaged mock-runtime checks only.
+Synthetic credentials/portals do not qualify a real vault, provider, Infra consume
+mount or Paperless ingestion. See doc/INFRA_RUNTIME_CONTRACT.md.
+"""
 
 import argparse
 import hashlib

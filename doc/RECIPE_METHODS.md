@@ -1,5 +1,10 @@
 # Recipe method contract
 
+For Infra folder delivery and qualification, use the
+[shared runtime contract](INFRA_RUNTIME_CONTRACT.md). Consumer references below
+describe engine internals; the shipped registry is empty and has no Settings/env
+configuration interface.
+
 The supported method surface of the daemon recipe runner. This is the
 contract that recipe validation hardening (finding F08 of the product
 audit, issue #27) implements against: validation must reject unknown

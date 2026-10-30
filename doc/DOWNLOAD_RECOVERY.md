@@ -1,5 +1,10 @@
 # Download recovery
 
+For Infra folder delivery and qualification, use the
+[shared runtime contract](INFRA_RUNTIME_CONTRACT.md). Consumer references below
+describe engine internals; the shipped registry is empty and has no Settings/env
+configuration interface.
+
 Contract: upstream [issue #24](https://github.com/s-t-e-f-a-n/BillCollector/issues/24).
 This change applies to daemon downloads. It does not change the legacy batch
 tracker, recipe contract, control protocol or exit codes.

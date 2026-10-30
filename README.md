@@ -1,5 +1,10 @@
 # BillCollector
 
+Infra deployments and provider handoffs use the
+[Infra runtime contract](doc/INFRA_RUNTIME_CONTRACT.md). It defines folder
+delivery, vault access, schema promotion and qualification boundaries.
+
+
 ![BillCollector EyeCatcher](/doc/BillCollector_EyeCatcher.jpg)
 
 Chromium's sandbox is required by the daemon and batch launchers. The reference
