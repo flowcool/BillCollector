@@ -92,10 +92,10 @@ does not grant automatic retries or count manual submissions in the login budget
 | Need | Action and proof |
 |---|---|
 | Expand a growing list | `click_until_absent`: exactly one supported page locator then the action; require visible-row count growth through `progress_selector`, `max_clicks` and `timeout_ms`. A visible disabled button is not completion. |
-| Download a fixed list | `download_all`: exactly one page locator then the action. Supply a stable non-empty unique `key_attribute`, `max_items`, `timeout_ms` and `event_window_ms`. Prove stable ordering and exactly one download per click. |
+| Download a fixed list | `download_all`: exactly one page locator then the action. Supply a stable non-empty unique `key_attribute`, `max_items`, `timeout_ms` and `event_window_ms`. Prove stable ordering and exactly one download per click. Daemon-only `incremental: true` skips committed stable document keys; `unpack: pdf` publishes the unchanged single PDF member of a ZIP. Never use session URLs or a constant bulk-button ID as incremental document identity. |
 | Traverse replacement calendars | Daemon `replacement_calendar`: one calendar-root locator, offered previous-month control, account/month/readiness proof and explicit empty markers. Visits all months in the run-start date window under shared bounds. See the [contract and example](REPLACEMENT_CALENDARS.md). |
 | Download one known document | `expect_download` with nested steps that trigger the click. Files pass through download tracking and per-task SHA-256 deduplication. |
-| Handle an empty list | Prove the portal's explicit empty state in a synthetic fixture. A collection with no downloads can still finish as `failure` under current run-result semantics. |
+| Handle an empty list | Prove the portal's explicit empty state in a synthetic fixture. An empty collection still fails. A completed incremental collection that skips known committed keys succeeds without downloads. |
 
 Collection actions cannot be graceful, nested under `expect_download`, or placed
 in login phases. They use bounded, single-attempt execution. Later failure does

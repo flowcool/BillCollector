@@ -233,6 +233,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Completed incremental collections with only committed keys finish as success
+  without downloads. Empty recipes and aborted runs retain their failure result.
+  Substitution-time OTP refresh uses the resolved vault item ID too.
+
+
 - Resolve vault credentials and TOTP by ID after a unique exact-name search.
   Case-variant names no longer make the CLI lookup ambiguous.
 - Start the scheduler paused and rebuild its loaded persistent jobstore before
