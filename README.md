@@ -234,6 +234,14 @@ The daemon is BillCollector's primary mode: `python3 -m billcollector serve` (th
 
 On the first start (while the task list is still empty), the `[Playwright]` sections of `bc_default.ini` and `bc_test.ini` are imported as tasks - each (service, user) pair becomes one task, initially **disabled**, with a default monthly cron (`0 0 1 * *`). You enable a task and set its cron schedule per task from the UI; the Task table in the database is the source of truth, and the daemon rebuilds its scheduler jobs from it on every start (a missed run coalesces into a single catch-up run).
 
+Numeric weekdays use cron numbering: `0` and `7` are Sunday, `1` is Monday.
+For example, `17 4 * * 0` runs on Sunday at 04:17 in the configured timezone.
+Named weekdays, numeric lists, ascending ranges and range/wildcard steps are supported.
+Other fields retain APScheduler's semantics, including combined day-of-month and
+day-of-week constraints. Before upgrading from an older daemon, review numeric
+weekday schedules: those versions interpreted `0` as Monday. Use named weekdays
+when rolling back to an older image to preserve the intended day.
+
 ### Environment Variables
 
 `apps/.env` (mounted read-only at `/apps/.env`) is the app configuration; the compose service additionally sets `BC_UI_HOST` and `NTFY_HOST` itself (these win over the file):
