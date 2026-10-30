@@ -114,9 +114,11 @@ arrival, retain a private JSON receipt with `original_sha256`, positive integer
 obtain those readbacks; the acknowledgement command does not query Paperless.
 The command also requires matching original bytes at the Download `saved_path`.
 If the consume watcher already removed that file, this command cannot acknowledge
-the row as-is. Stop and use an Infra-reviewed recovery that preserves the original
-and receipt; do not resend, recreate the file in consume, or clear pending state
-merely to satisfy this precondition.
+the row as-is. There is no shipped recovery procedure for this case. Clearing
+such a row needs a reviewed engine change, then an Infra operation plan with the
+retained original and receipt. This is a known recovery gap. Keep the task stopped;
+do not resend, recreate the file in consume, or clear pending state merely to
+satisfy this precondition.
 
 This recovery command is not a normal consume-folder ingestion step.
 

@@ -42,7 +42,10 @@ Other providers use their Infra-owned consumption rules.
 
 An uncertain publication or archive result stops dependent retries. Preserve DB,
 journal, profiles, originals and receipts. Reconcile the existing effect before
-sending or collecting again. See [download recovery](DOWNLOAD_RECOVERY.md) and
+sending or collecting again. If a Bourse Direct uncertain row has lost its
+`saved_path` after ingestion, the shipped acknowledgement command cannot clear
+it. Recovery for that case is a known code gap; keep the task stopped pending
+a reviewed engine change and an Infra operation plan. See [download recovery](DOWNLOAD_RECOVERY.md) and
 [Bourse Direct recovery](BOURSE_DIRECT.md#retention-and-delivery).
 
 ## Vault interface
@@ -74,8 +77,10 @@ Preserve optional-TOTP behavior and fresh TOTP retrieval through this same clien
 The image contains the release schema at
 `/opt/billcollector/recipe-pw-schema.yaml`. The daemon validates with
 `/apps/recipes_playwright/recipe-pw-schema.yaml`, which a recipe-directory mount
-can hide. `cp -n` initializes a missing file; it preserves an existing file,
-even if that file is incompatible with new recipe actions.
+can hide. Infra owns the initialization step: `cp -n` can seed a missing file
+from the packaged schema, but preserves an existing file even when incompatible
+with new recipe actions. The image does not perform this copy automatically.
+Without a schema in the mounted recipe directory, validation fails.
 
 Every release and Infra handoff states the SHA-256 of
 `apps/recipes_playwright/recipe-pw-schema.yaml`. This candidate's schema is:
