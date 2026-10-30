@@ -3,9 +3,6 @@ name: Playwright assurance
 on:
   pull_request:
     branches: [main, playwright-next]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
   push:
     branches: [main, playwright-next, "integration/**"]
     tags: ["v*", "playwright-v*"]
@@ -26,6 +23,40 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Classify image inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.paths.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          import subprocess
+
+          image = True
+          if os.environ["EVENT_NAME"] == "pull_request":
+              paths = subprocess.check_output([
+                  "git", "diff", "--name-only", "-z",
+                  f"{os.environ['BASE_SHA']}...{os.environ['HEAD_SHA']}",
+              ]).decode().split("\0")
+              # SAFE_LOGIN.md contains executable recipe examples tested by pytest.
+              image = any(path and (not path.endswith(".md") or
+                                    path == "doc/SAFE_LOGIN.md") for path in paths)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"image={str(image).lower()}\n")
+          PYTHON
+
   validate:
     name: Unit and browser tests
     runs-on: ubuntu-24.04
@@ -131,6 +162,8 @@ jobs:
 
   image-scan:
     name: Image security
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
