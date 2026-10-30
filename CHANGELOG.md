@@ -247,6 +247,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Substitution-time OTP refresh uses the resolved vault item ID too.
 
 
+- Daemon vault lookup accepts the encoded search query through the pinned HTTP
+  transport. Configured base API URLs still reject queries. Local-network,
+  userinfo, port and fragment checks remain enforced.
 - Resolve vault credentials and TOTP by ID after a unique exact-name search.
   Case-variant names no longer make the CLI lookup ambiguous.
 - Start the scheduler paused and rebuild its loaded persistent jobstore before
