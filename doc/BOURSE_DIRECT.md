@@ -14,14 +14,16 @@ Florent's 2026-10-30 GO covers automatic collection and Paperless delivery.
 Infra owns deployment, provider configuration, schedules, Paperless permissions
 and live acceptance in `infra-1lr1.3`. Record its exact versioned commands,
 targets, stop conditions and provider-only recovery before live execution.
-Keep at least 60 seconds between broker login transactions or original requests.
+Keep at least 60 seconds between broker login transactions. Original PDF reads
+use the separate configurable engine gate (default 5 seconds); see Request pacing.
 No Ghostfolio production import, stable publication or removal of originals,
 containers or proof is included. Preserve CC Genevois and Sunday 04:17.
 
 ## Selected implementation
 
 Use a pinned fork image from `playwright-next` that includes the Bourse Direct
-modules and recipe. They were integrated in fork PR #76. State the exact image,
+modules. The recipe is now owned and released by the catalog; the earlier
+bundled implementation was integrated in fork PR #76. State the exact image,
 recipe and schema hashes in the Infra handoff. Keep historical candidate
 `3110157` and its private two-pass proof intact; they are not the current runtime
 or proof of the daemon/Infra interfaces. The engine journal, source keys,
