@@ -284,3 +284,23 @@ def test_meaningful_named_destination_labels_are_not_generation_metadata(tmp_pat
         writer.write(path)
         hashes.append(revision_digest(path))
     assert hashes[0] != hashes[1]
+
+
+def test_generic_notice_identity_keeps_generic_consumer_recovery(tmp_path, monkeypatch):
+    db = Database(tmp_path/'generic.db')
+    db.set_setting('download_dir', str(tmp_path/'out'))
+    task = db.create_task('another-provider', 'synthetic')
+    calls = []
+    def consumer(record):
+        calls.append(record)
+        if len(calls) == 1:
+            raise TimeoutError('Synthetic consumer failure')
+    monkeypatch.setattr(downloads, 'CONSUMERS', [consumer])
+    downloads.track_download(Download(pdf(tmp_path/'original.pdf')),
+                             db.create_run(task), db.get_task(task), db, identity=POLICY)
+    row = db.list_downloads(task_id=task)[0]
+    assert row['state'] == 'published' and row['delivery_policy'] is None
+    downloads.recover_downloads(db)
+    assert len(calls) == 2
+    assert db.list_downloads(task_id=task)[0]['state'] == 'consumed'
+    db.close()

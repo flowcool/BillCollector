@@ -3,7 +3,8 @@
 This is a local fork extension. Upstream issue #38 remains a separate agreement.
 The collector owns repeat suppression. Paperless owns archive storage. A download
 record is not an archive receipt. The local integration uses the selected engine
-publication journal and the strict notice delivery rule below. Run results,
+publication journal. Bourse Direct selects the strict delivery policy below.
+Generic notice identity keeps the ordinary consumer recovery contract. Run results,
 scheduling and financial import behavior keep their existing contracts.
 
 ## Recipe interface
@@ -76,8 +77,8 @@ contract applies; there is no text-only fallback.
 
 ## Existing databases and recovery
 
-The schema adds nullable `source_identity` and `revision_sha256` columns and an
-index. Existing rows and raw-SHA behavior remain intact. There is no automatic
+The schema adds nullable `source_identity`, `revision_sha256` and
+`delivery_policy` columns and a notice-revision index. Existing rows and raw-SHA behavior remain intact. There is no automatic
 historical conversion or private-file scan. The first opted-in acquisition of
 an old notice can publish once because historical rows have no source identity.
 A later acquisition of that revision is suppressed, including after DB reopen.
@@ -86,7 +87,9 @@ notice-identity dedup key. A task/account reconfiguration needs its own history
 and recovery decision.
 
 The journal commits the row before local publication and consumer effects.
-An opted-in notice commits `delivery_uncertain` before calling a consumer.
+Only the Bourse Direct action selects `delivery_policy=bourse-direct` and commits
+`delivery_uncertain` before calling a consumer. Generic `notice_identity` alone
+does not select that policy.
 A crash or consumer exception preserves that state. Automatic recovery skips
 the row and the provider stops until explicit receipt reconciliation. This is
 not an exactly-once consumer guarantee. Generic downloads retain the selected

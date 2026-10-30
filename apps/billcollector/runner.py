@@ -529,10 +529,11 @@ def _collection_actions(ctx, step=None):
         from .bourse_direct import POLICY, collect
         if not step or step.get('notice_identity') != POLICY:
             raise collection.CollectionError('Bourse Direct requires its source identity policy')
-        return collect(ctx, options, save_download,
+        return collect(ctx, options,
+                       lambda download: save_download(download, delivery_policy="bourse-direct"),
                        lambda token: process_argument(token, ctx.bcs))
 
-    def save_download(download, *, source_key=None, unpack=None):
+    def save_download(download, *, source_key=None, unpack=None, delivery_policy=None):
         filename = str(download.suggested_filename)
         # An unpacked archive name is a transport name, not document identity.
         if unpack is None and filename in collection_filenames and not identity_kwargs:
@@ -540,7 +541,8 @@ def _collection_actions(ctx, step=None):
                 "collection produced a duplicate suggested filename"
             )
         options = {k: v for k, v in
-                   {"source_key": source_key, "unpack": unpack}.items()
+                   {"source_key": source_key, "unpack": unpack,
+                    "delivery_policy": delivery_policy}.items()
                    if v is not None}
         record = downloads.track_download(
             download, ctx.run_id, ctx.task, ctx.db, **options, **identity_kwargs

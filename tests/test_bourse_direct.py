@@ -365,3 +365,34 @@ def test_uncertain_notice_does_not_block_another_provider(lab, monkeypatch):
                                       lab.db.create_run(other), lab.db.get_task(other), lab.db)
     assert not record['duplicate'] and len(seen) == 1
     assert lab.db.list_downloads(task_id=lab.task_id)[0]['state'] == 'delivery_uncertain'
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_failure_while_recovering_strict_notice_does_not_block_another_task(lab, monkeypatch, legacy):
+    from billcollector.interrupt import RunInterrupted
+
+    publish = downloads._publish
+    monkeypatch.setattr(downloads, '_publish', lambda *args: (_ for _ in ()).throw(RunInterrupted()))
+    with pytest.raises(RunInterrupted):
+        lab.run()
+    monkeypatch.setattr(downloads, '_publish', publish)
+    if legacy:
+        lab.db.conn.execute('UPDATE Download SET delivery_policy=NULL WHERE task_id=?', (lab.task_id,))
+        lab.db.conn.commit()
+    calls = []
+    def consumer(record):
+        calls.append(record['task_id'])
+        if record['task_id'] == lab.task_id:
+            raise TimeoutError('Synthetic uncertain recovery')
+    monkeypatch.setattr(downloads, 'CONSUMERS', [consumer])
+    other = lab.db.create_task('another-provider', 'synthetic')
+    record = downloads.track_download(source.Original(original('other'), 'https://portal.invalid/file',
+                                                      'synthetic', date(2026, 1, 2)),
+                                      lab.db.create_run(other), lab.db.get_task(other), lab.db)
+    assert not record['duplicate'] and calls == [lab.task_id, other]
+    assert lab.db.list_downloads(task_id=lab.task_id)[0]['state'] == 'delivery_uncertain'
+    assert lab.db.list_downloads(task_id=lab.task_id)[0]['delivery_policy'] == (None if legacy else 'bourse-direct')
+    downloads.recover_downloads(lab.db)
+    assert calls == [lab.task_id, other]
+    (_, aborted, _), _ = lab.run()
+    assert aborted

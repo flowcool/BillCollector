@@ -152,7 +152,7 @@ class Database:
             if name not in download_cols:
                 self.conn.execute(f"ALTER TABLE Download ADD COLUMN {name} {definition}")
 
-        for name in ("source_identity", "revision_sha256"):
+        for name in ("source_identity", "revision_sha256", "delivery_policy"):
             if name not in download_cols:
                 self.conn.execute(f"ALTER TABLE Download ADD COLUMN {name} TEXT")
         self.conn.execute(
@@ -422,14 +422,14 @@ class Database:
     def insert_download(self, run_id, task_id, url, filename, size, sha256,
                         saved_path, duplicate_of_id=None, *,
                         state="consumed", staged_path=None, source_key=None,
-                        source_identity=None, revision_sha256=None):
+                        source_identity=None, revision_sha256=None, delivery_policy=None):
         cur = self.conn.execute(
             """INSERT INTO Download (run_id, task_id, url, filename, size, sha256,
                                      saved_path, created_at, duplicate_of_id, state, staged_path,
-                                     source_key, source_identity, revision_sha256)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                     source_key, source_identity, revision_sha256, delivery_policy)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (run_id, task_id, url, filename, size, sha256, saved_path, now(), duplicate_of_id, state, staged_path,
-             source_key, source_identity, revision_sha256))
+             source_key, source_identity, revision_sha256, delivery_policy))
         self.conn.commit()
         return cur.lastrowid
 
