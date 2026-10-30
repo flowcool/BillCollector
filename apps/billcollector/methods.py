@@ -16,7 +16,7 @@ from playwright.sync_api import Page
 from .collection import CollectionError
 
 _RESERVED = frozenset({'login', 'wait_user', 'expect_download',
-                       'click_until_absent', 'download_all', 'replacement_calendar'})
+                       'click_until_absent', 'download_all', 'replacement_calendar', 'bourse_direct'})
 _UNTIL = (('role', 'get_by_role'), ('test_id', 'get_by_test_id'),
           ('placeholder', 'get_by_placeholder'), ('label', 'get_by_label'),
           ('text', 'get_by_text'), ('selector', 'locator'))
@@ -162,6 +162,11 @@ def validate_method_recipe(recipe):
                     if arguments:
                         raise ValueError('expect_download does not accept arguments')
                     continue
+                if name == 'bourse_direct':
+                    from .bourse_direct import POLICY, validate_options
+                    validate_options(arguments[0] if len(arguments) == 1 else None)
+                    if step.get('notice_identity') != POLICY:
+                        raise ValueError('Bourse Direct requires its source identity policy')
                 if name == 'replacement_calendar':
                     from .calendar import validate_options
                     options = arguments[0] if len(arguments) == 1 else None

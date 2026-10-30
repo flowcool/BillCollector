@@ -77,7 +77,7 @@ MAX_STEP_ATTEMPTS = 3
 # step instead of inheriting the generic three-attempt replay loop. An
 # operator-driven resume starts a new, explicit invocation after inspection.
 _COLLECTION_METHODS = frozenset({
-    "click_until_absent", "download_all", "replacement_calendar",
+    "click_until_absent", "download_all", "replacement_calendar", "bourse_direct",
 })
 
 
@@ -355,7 +355,7 @@ def transform_step_to_json(step):
         if method_name in [
             "click", "fill", "expect_download", "goto", "close",
             "content_frame", "first", "click_until_absent", "download_all",
-            "replacement_calendar",
+            "replacement_calendar", "bourse_direct",
         ]:
             transformed_step["actions"] = transformed_step.get("actions", [])
             transformed_step["actions"].append({
@@ -522,18 +522,30 @@ def _collection_actions(ctx, step=None):
     def paginate(locator, options):
         return collection.click_until_absent(ctx.page, locator, options)
 
-    def save_download(download, *, source_key=None, unpack=None):
+    identity_kwargs = ({"identity": step["notice_identity"]}
+                       if step and "notice_identity" in step else {})
+
+    def bourse_direct(root, options):
+        from .bourse_direct import POLICY, collect
+        if not step or step.get('notice_identity') != POLICY:
+            raise collection.CollectionError('Bourse Direct requires its source identity policy')
+        return collect(ctx, options,
+                       lambda download: save_download(download, delivery_policy="bourse-direct"),
+                       lambda token: process_argument(token, ctx.bcs))
+
+    def save_download(download, *, source_key=None, unpack=None, delivery_policy=None):
         filename = str(download.suggested_filename)
         # An unpacked archive name is a transport name, not document identity.
-        if unpack is None and filename in collection_filenames:
+        if unpack is None and filename in collection_filenames and not identity_kwargs:
             raise collection.CollectionError(
                 "collection produced a duplicate suggested filename"
             )
         options = {k: v for k, v in
-                   {"source_key": source_key, "unpack": unpack}.items()
+                   {"source_key": source_key, "unpack": unpack,
+                    "delivery_policy": delivery_policy}.items()
                    if v is not None}
         record = downloads.track_download(
-            download, ctx.run_id, ctx.task, ctx.db, **options
+            download, ctx.run_id, ctx.task, ctx.db, **options, **identity_kwargs
         )
         collection_filenames.add(filename)
         ctx.files_downloaded.append({
@@ -581,6 +593,7 @@ def _collection_actions(ctx, step=None):
         "click_until_absent": paginate,
         "download_all": download,
         "replacement_calendar": replacement_calendar,
+        "bourse_direct": bourse_direct,
     }
 
 
@@ -919,7 +932,9 @@ def _handle_download(ctx, step):
             for nested_step in sorted(step.get("steps", []), key=lambda x: x.get("step", 0)):
                 _execute_step(ctx, nested_step, parent_step=step_number)
         download = download_info.value
-        record = downloads.track_download(download, ctx.run_id, ctx.task, ctx.db)
+        record = downloads.track_download(
+            download, ctx.run_id, ctx.task, ctx.db,
+            **({"identity": step["notice_identity"]} if "notice_identity" in step else {}))
     except RunInterrupted:
         raise  # a shutdown signal is not a download error to pause on
     except StepAbortError:
@@ -1002,7 +1017,7 @@ def _run_recipe(ctx, recipe):
     return files_downloaded, aborted, pause_outcome
 
 
-def run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
+def run_task(task_id: int, debug: bool = False, *, date_from=None, collection_mode=None) -> int:
     """Serialize all runner entries, including direct CLI invocations.
 
     A process-held lock survives neither crash nor SIGKILL, and must never be
@@ -1018,12 +1033,15 @@ def run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
         except BlockingIOError:
             print("runner: task already has an active runner", file=sys.stderr)
             return 1
-        if date_from is None:
-            return _run_task(task_id, debug)
-        return _run_task(task_id, debug, date_from=date_from)
+        options = {}
+        if date_from is not None:
+            options['date_from'] = date_from
+        if collection_mode is not None:
+            options['collection_mode'] = collection_mode
+        return _run_task(task_id, debug, **options)
 
 
-def _run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
+def _run_task(task_id: int, debug: bool = False, *, date_from=None, collection_mode=None) -> int:
     """Execute one task run (sync Playwright step loop).
 
     Returns the process exit code: 0 on success, 1 on a run failure
@@ -1056,6 +1074,13 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
         if not ok:
             print(f"runner: {error}", file=sys.stderr)
             return 1
+        if collection_mode is not None:
+            from .bourse_direct import select_mode
+            try:
+                select_mode(recipe, collection_mode)
+            except ValueError as e:
+                print(f"runner: {e}", file=sys.stderr)
+                return 1
         try:
             validate_login_recipe(recipe)
         except ValueError as e:
