@@ -1,0 +1,27 @@
+$schema: recipe-pw-schema.yaml
+services:
+  - serviceName: BourseDirect
+    description: Original operation notices for one PEA account. Local daemon adapter required.
+    steps:
+      - step: 1
+        description: Open the source login page or recover the stored session.
+        methods:
+          - method: goto
+            arguments:
+              - url: https://www.boursedirect.fr/fr/login
+              - wait_until: domcontentloaded
+      - step: 2
+        description: Collect offered original notices with protected login and revision tracking.
+        notice_identity:
+          query_parameters: [nc, type, year, month, day]
+        methods:
+          - method: locator
+            arguments:
+              - selector: body
+          - method: bourse_direct
+            arguments:
+              - account_type: PEA
+                incremental: true
+                max_months: 12
+                max_items: 100
+                timeout_ms: 7200000

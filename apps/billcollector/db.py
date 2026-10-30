@@ -152,6 +152,13 @@ class Database:
             if name not in download_cols:
                 self.conn.execute(f"ALTER TABLE Download ADD COLUMN {name} {definition}")
 
+        for name in ("source_identity", "revision_sha256", "delivery_policy"):
+            if name not in download_cols:
+                self.conn.execute(f"ALTER TABLE Download ADD COLUMN {name} TEXT")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS download_notice_revision "
+            "ON Download(task_id, source_identity, revision_sha256)")
+
     # ---- Task -------------------------------------------------------------
     def create_task(self, service, user, recipe_file=None, enabled=False,
                     cron=None, profile_dir=None, date_window_days=90):
@@ -414,14 +421,15 @@ class Database:
     # ---- Download ---------------------------------------------------------
     def insert_download(self, run_id, task_id, url, filename, size, sha256,
                         saved_path, duplicate_of_id=None, *,
-                        state="consumed", staged_path=None, source_key=None):
+                        state="consumed", staged_path=None, source_key=None,
+                        source_identity=None, revision_sha256=None, delivery_policy=None):
         cur = self.conn.execute(
             """INSERT INTO Download (run_id, task_id, url, filename, size, sha256,
                                      saved_path, created_at, duplicate_of_id, state, staged_path,
-                                     source_key)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                     source_key, source_identity, revision_sha256, delivery_policy)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (run_id, task_id, url, filename, size, sha256, saved_path, now(), duplicate_of_id, state, staged_path,
-             source_key))
+             source_key, source_identity, revision_sha256, delivery_policy))
         self.conn.commit()
         return cur.lastrowid
 
@@ -439,6 +447,12 @@ class Database:
         return self.conn.execute(
             "SELECT * FROM Download WHERE task_id=? AND sha256=? ORDER BY id",
             (task_id, sha256)).fetchone()
+
+    def find_notice_revision(self, task_id, source_identity, revision_sha256):
+        return self.conn.execute(
+            "SELECT * FROM Download WHERE task_id=? AND source_identity=? "
+            "AND revision_sha256=? AND duplicate_of_id IS NULL ORDER BY id",
+            (task_id, source_identity, revision_sha256)).fetchone()
 
     def known_source_keys(self, task_id):
         """Source keys already committed for this task (incremental collection)."""

@@ -23,7 +23,7 @@ COLLECTION_LOCATOR_METHODS = frozenset({
     "get_by_title", "get_by_placeholder", "get_by_test_id",
 })
 COLLECTION_ACTION_METHODS = frozenset({
-    "click_until_absent", "download_all", "replacement_calendar",
+    "click_until_absent", "download_all", "replacement_calendar", "bourse_direct",
 })
 
 logger = logging.getLogger(__name__)

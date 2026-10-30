@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from uuid import uuid4
 
-from . import config
+from . import config, notice
 from .consumers import CONSUMERS
 from .interrupt import RunInterrupted
 from .redaction import sanitize_url
@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # Private recovery-child exit codes. Parent diagnostics contain fixed text only.
 _RECOVERY_FAILURES = {65: "checksum mismatch", 66: "reserved destination occupied",
                       70: "database failure", 74: "filesystem failure", 77: "permission denied"}
+
+
+class NoticeDeliveryUncertain(ValueError):
+    """A provider consumer may have acted; retain state without automatic replay."""
 
 
 class _RecoveryFailure(OSError):
@@ -146,6 +150,15 @@ def _deliver(row, db):
         return
     record = {k: row[k] for k in _FIELDS}
     record["idempotency_key"] = f"{row['task_id']}:{row['sha256']}"
+    policy = row.get('delivery_policy') if isinstance(row, dict) else row['delivery_policy']
+    source = row.get('source_identity') if isinstance(row, dict) else row['source_identity']
+    # Preserve pre-policy BD journal rows only when the durable acquisition key
+    # positively binds this exact source. Do not convert generic notice history.
+    strict = policy == 'bourse-direct' or (source is not None and
+        db.get_setting(f"bourse_direct_pending_{row['task_id']}") == source)
+    if strict:
+        # Commit before any external effect. A crash never permits automatic replay.
+        db.set_download_state(row['id'], 'delivery_uncertain')
     failed = False
     for consume in CONSUMERS:
         saved = Path(row["saved_path"])
@@ -159,6 +172,10 @@ def _deliver(row, db):
             failed = True
             # Consumer exceptions can contain document URLs or credentials.
             logger.error("Download consumer failed; delivery remains pending")
+            if strict:
+                break
+    if strict and failed:
+        raise NoticeDeliveryUncertain('Notice delivery is uncertain; reconcile before another action')
     if not failed:
         db.set_download_state(row["id"], "consumed")
 
@@ -226,22 +243,41 @@ def _recover_locked(db, target):
                 except (OSError, ValueError, KeyError, TypeError):
                     _quarantine(entry)
                     continue
+                if (metadata.get('delivery_policy') == 'bourse-direct'
+                        or (metadata.get('source_identity') and
+                            db.get_setting(f"bourse_direct_pending_{metadata['task_id']}")
+                            == metadata['source_identity'])):
+                    db.set_setting(f"bourse_direct_pending_{metadata['task_id']}",
+                                   metadata['source_identity'])
+                    logger.warning('Uncommitted notice retained for operator reconciliation')
+                    continue
                 if saved.is_file() and sha256_of(saved) == metadata["sha256"]:
                     # Conservative recovery of publication without its row:
                     # do not replay an unknown external consumer effect.
                     db.insert_download(**{k: metadata[k] for k in _FIELDS},
                                        staged_path=str(staged), state="consumed",
-                                       source_key=metadata.get("source_key"))
+                                       source_key=metadata.get("source_key"),
+                                       source_identity=metadata.get("source_identity"),
+                                       revision_sha256=metadata.get("revision_sha256"),
+                                       delivery_policy=metadata.get("delivery_policy"))
                     _clean_journal(entry)
                 else:
                     _quarantine(entry)
     for row in rows.values():
+        if row['state'] == 'delivery_uncertain':
+            logger.warning('Notice delivery is uncertain; automatic resend refused')
+            continue
         entry = Path(row["staged_path"]).parent
         if row["state"] == "staged":
             _publish(row, db)
             row["state"] = "published"
         if row["state"] == "published":
-            _deliver(row, db)
+            try:
+                _deliver(row, db)
+            except NoticeDeliveryUncertain:
+                # The affected provider stops; unrelated tasks can recover/save.
+                logger.warning('Notice recovery needs a receipt; other tasks may continue')
+                continue
         if entry.exists():
             # Failed consumers retain the journal and pending row for retry.
             current = db.find_download_by_sha(row["task_id"], row["sha256"])
@@ -265,17 +301,26 @@ def recover_downloads(db):
             _recover_locked(db, target)
 
 
-def track_download(download, run_id, task, db, *, source_key=None, unpack=None):
+def track_download(download, run_id, task, db, *, source_key=None, unpack=None, identity=None,
+                   delivery_policy=None):
     """Stage one Playwright Download, commit intent, publish, then deliver.
 
     ``source_key`` records the collection key for incremental runs.
     ``unpack="pdf"`` publishes the single PDF member of a ZIP download.
     Existing same-task hashes retain an audit row without another publication.
-    Consumer failures remain pending and do not fail the recipe. Filesystem or
-    database errors propagate to the runner; recovery precedes any later save.
+    Generic consumer failures remain pending without failing the recipe.
+    Bourse Direct failures raise after committing uncertainty; recovery skips
+    that provider effect. Filesystem/DB errors propagate. Recovery precedes saves.
     """
+    if delivery_policy not in {None, 'bourse-direct'}:
+        raise ValueError('Unsupported delivery policy')
+    if delivery_policy is not None and identity is None:
+        raise ValueError('Strict delivery requires notice identity')
     target = Path(download_dir(db)).resolve()
     with _publication_lock(target):
+        if identity is not None and any(r['state'] == 'delivery_uncertain'
+                                       for r in db.list_downloads(task_id=task['id'])):
+            raise ValueError('Notice delivery needs reconciliation before collection')
         _recover_locked(db, target)
         # Preserve the fork's basename normalization for portal filenames.
         filename = str(download.suggested_filename).replace("\\", "/").rsplit("/", 1)[-1]
@@ -306,9 +351,15 @@ def track_download(download, run_id, task, db, *, source_key=None, unpack=None):
             "run_id": run_id, "task_id": task["id"],
             "url": sanitize_url(str(download.url)), "filename": filename,
             "size": staged.stat().st_size, "sha256": sha,
-            "source_key": source_key,
+            "source_key": source_key, "delivery_policy": delivery_policy,
         }
-        existing = db.find_download_by_sha(task["id"], sha)
+        if identity is not None:
+            record['source_identity'] = notice.source_digest(str(download.url), identity)
+            record['revision_sha256'] = notice.revision_digest(staged)
+            existing = db.find_notice_revision(task['id'], record['source_identity'],
+                                               record['revision_sha256'])
+        else:
+            existing = db.find_download_by_sha(task["id"], sha)
         if existing is not None:
             record["saved_path"] = existing["saved_path"]
             db.insert_download(**record, duplicate_of_id=existing["id"])
