@@ -8,7 +8,11 @@ The Playwright assurance workflow runs on pull requests, maintained-branch pushe
 release tags, manual dispatch and a weekly schedule. It checks unit tests, a
 synthetic Chromium page, dependency consistency, undefined Python names, known
 runtime dependency vulnerabilities, CodeQL for Python and Actions, and the built
-container. The daemon pytest suite uses repository-local Chromium binaries.
+container. Markdown-only pull requests skip the image job and report its check
+as skipped; unit, security and CodeQL checks still run. Changes to executable
+recipe examples in `doc/SAFE_LOGIN.md` also run the image job. The workflow
+continues to trigger on every PR so required checks cannot remain pending.
+The daemon pytest suite uses repository-local Chromium binaries.
 The mock regression initializes its private legacy SQLite tables before running. GitHub schedules use UTC and execute the default branch's workflow.
 
 Bandit records medium and high findings and rejects high-severity findings.
