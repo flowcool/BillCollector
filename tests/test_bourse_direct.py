@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sqlite3
 import threading
+import time
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlencode, urlsplit
 
@@ -37,7 +38,7 @@ def original(generation, corrected=False):
 def lab(tmp_path, monkeypatch):
     data = SimpleNamespace(generation=0, corrected=False, requests=[], reservations=[],
                            refused=[], pdfs=[], wrong_pdf=False, empty=False,
-                           missing_pdf=False, same_date=False)
+                           missing_pdf=False, same_date=False, calendar_delay=0)
     db_path = tmp_path / 'proof.db'
 
     class Portal(BaseHTTPRequestHandler):
@@ -95,6 +96,7 @@ def lab(tmp_path, monkeypatch):
                          if parsed.path == '/fr/page/avis-operes' else '')
                 self.respond(3 * '<nav hidden><a href="/fr/deconnexion">Logout</a><a href="/fr/page/avis-operes">Notices</a></nav>' + frame)
             elif parsed.path == source.CALENDAR:
+                time.sleep(data.calendar_delay)
                 nc = query.get('nc', ['1'])[0]
                 year, month = int(query.get('year', ['2026'])[0]), int(query.get('month', ['1'])[0])
                 links = ''
@@ -198,6 +200,8 @@ def test_actual_recipe_login_originals_regenerated_repeat_and_correction(lab, mo
 
 
 def test_month_replacement_and_year_rollover_keep_complete_first_month(lab):
+    # The old select remains visible while the next calendar response is pending.
+    lab.calendar_delay = 0.3
     (files, aborted, _), rows = lab.run(date(2025, 12, 20))
     assert not aborted
     assert len(files) == len(rows) == 4

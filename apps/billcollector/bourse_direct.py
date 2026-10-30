@@ -288,13 +288,13 @@ def collect(ctx, options, save_download, resolve):
         if not selected['selected']:
             frame.locator('select#nc').select_option(value=selected['value'])
             # The observed account selector is a GET form. Submit only that form.
-            frame.locator('select#nc').evaluate('''select => {
-                const f = select.form;
-                if (!f || f.method.toLowerCase() !== 'get' || new URL(f.action).origin !== location.origin
-                    || new URL(f.action).pathname !== location.pathname) throw Error('ACCOUNT_FORM_REFUSED');
-                f.requestSubmit();
-            }''')
-            frame.wait_for_load_state('domcontentloaded', timeout=min(15000, remaining()))
+            with frame.expect_navigation(wait_until='domcontentloaded', timeout=min(15000, remaining())):
+                frame.locator('select#nc').evaluate('''select => {
+                    const f = select.form;
+                    if (!f || f.method.toLowerCase() !== 'get' || new URL(f.action).origin !== location.origin
+                        || new URL(f.action).pathname !== location.pathname) throw Error('ACCOUNT_FORM_REFUSED');
+                    f.requestSubmit();
+                }''')
         account = selected['value']
         if not db.login_succeeded(task_id, run_id):
             raise SourceError('Bourse Direct login ownership changed')
@@ -340,7 +340,8 @@ def collect(ctx, options, save_download, resolve):
                 control = frame.locator('a[title="Mois précédent"]')
                 if control.count() != 1:
                     raise SourceError('Bourse Direct previous-month control is ambiguous')
-                control.click(timeout=min(15000, remaining()))
+                with frame.expect_navigation(wait_until='domcontentloaded', timeout=min(15000, remaining())):
+                    control.click(timeout=min(15000, remaining()))
                 frame.locator('select#nc').wait_for(timeout=min(15000, remaining()))
         return count
     except RunInterrupted:
