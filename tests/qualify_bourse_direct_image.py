@@ -18,11 +18,16 @@ BOOTSTRAP = r'''
 import hashlib, json, os, shutil, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, '/apps')
+root = Path(tempfile.mkdtemp(prefix='bd-image-proof-'))
+# Configure isolation BEFORE importing modules that capture environment paths.
+for name, relative in {'BC_DATA_DIR':'data', 'BC_DB_DIR':'db', 'BC_DB_FILE':'db/proof.db',
+                       'BC_LOG_DIR':'logs', 'BC_PROFILE_ROOT':'profiles',
+                       'BC_DOWNLOAD_DIR':'downloads', 'HOME':'home'}.items():
+    os.environ[name] = str(root/relative)
 from billcollector import bourse_direct, config, downloads, notice, runner
 import pypdf
 assert os.getuid() == 1003 and os.getgid() == 1000
 assert pypdf.__version__ == '6.21.2'
-root = Path(tempfile.mkdtemp(prefix='bd-image-proof-'))
 shutil.copytree('/checks/tests', root/'tests')
 shutil.copytree('/apps/recipes_playwright', root/'apps/recipes_playwright')
 hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()
