@@ -14,14 +14,16 @@ Florent's 2026-10-30 GO covers automatic collection and Paperless delivery.
 Infra owns deployment, provider configuration, schedules, Paperless permissions
 and live acceptance in `infra-1lr1.3`. Record its exact versioned commands,
 targets, stop conditions and provider-only recovery before live execution.
-Keep at least 60 seconds between broker login transactions or original requests.
+Keep at least 60 seconds between broker login transactions. Original PDF reads
+use the separate configurable engine gate (default 5 seconds); see Request pacing.
 No Ghostfolio production import, stable publication or removal of originals,
 containers or proof is included. Preserve CC Genevois and Sunday 04:17.
 
 ## Selected implementation
 
 Use a pinned fork image from `playwright-next` that includes the Bourse Direct
-modules and recipe. They were integrated in fork PR #76. State the exact image,
+modules. The recipe is now owned and released by the catalog; the earlier
+bundled implementation was integrated in fork PR #76. State the exact image,
 recipe and schema hashes in the Infra handoff. Keep historical candidate
 `3110157` and its private two-pass proof intact; they are not the current runtime
 or proof of the daemon/Infra interfaces. The engine journal, source keys,
@@ -38,9 +40,10 @@ use source-key presence alone to discard a notice.
 ## Configuration and invocation
 
 Apply the shared [runtime contract](INFRA_RUNTIME_CONTRACT.md) before configuring the task.
-One native task selects one offered account. `account_type` is `PEA` by default;
+Install the Bourse Direct recipe from `flowcool/billcollector-recipes`; the engine
+ships a synthetic test fixture only. One native task selects one offered account. `account_type` is `PEA` by default;
 `PEA-PME` is supported in isolated tests only. Set the task's `recipe_file` to
-`/apps/recipes_playwright/recipe-pw__boursedirect.yaml`. Use the same task ID for
+`/apps/recipes_playwright/recipe-pw__bourse_direct.yaml`. Use the same task ID for
 both actions. Do not create a second task or reset the database for Download All.
 
 The native vault item name is exactly `<task.service> <task.user>`, trimmed.
@@ -69,7 +72,11 @@ printf '%s\n' "$START_DATE" | python3 -m billcollector run "$TASK_ID" \
 
 `date_window_days` defaults to 90. The adapter reads complete intersecting months,
 including the first partial month. It does not promise a strict calendar-day
-filter. `max_months=12`, `max_items=100`, `timeout_ms=7200000` bound this recipe.
+filter. The catalog owns `max_months`, `max_items` and `timeout_ms`. Download All starts
+at the first day of the oldest month within `max_months` (13 in the catalog).
+Incremental retains the task window (default 90 days), bounded by `max_months`.
+An explicit `--date-from-stdin` start wins for either mode. A reset to the current
+month while traversing older periods fails closed; no older availability is inferred.
 Missing month/account evidence stops collection. A generic empty month retains
 the selected engine's existing empty-run result.
 
@@ -80,6 +87,35 @@ there is no configurable consumer hook. Infra's Paperless consumption workflow
 filters `BourseDirect_*.pdf` and sets owner, exact Source `Bourse Direct`, and reader
 permissions. Infra verifies the archived original and those fields independently.
 `consumed` records local publication, not a Paperless receipt.
+
+## Request pacing
+
+The engine uses independent durable login and document gates from the reusable
+`billcollector.throttle` module. The Settings key
+`login_request_interval_seconds` defaults to 60 seconds and accepts 60–3600.
+The key `document_request_interval_seconds` defaults to 5 seconds and accepts
+0.1–3600. These generic keys configure request classes; they are not recipe
+options or new Task columns. Invalid values fail before login or document reads.
+Only adapters that explicitly call this engine primitive use these settings.
+
+The Bourse Direct adapter preserves its existing login timestamp and 60-second
+minimum. It waits before credential/OTP retrieval and keeps the durable attempt
+budget and single-submission behavior. Each original PDF uses a separate
+instance-wide document timestamp. HTML/calendar requests keep their current
+behavior. A document read does not defer the next permitted login.
+
+Lock contention and document waits consume the same bounded run deadline.
+For N original PDFs the pacing component is at most N minus one document
+intervals when starting from an unused document gate; an existing reservation
+can add one interval. Network, parsing and navigation time also consume the
+budget. No gate retries a request or resumes an uncertain acquisition.
+
+Retained qualification tooling used 60 seconds as an operator precaution for
+both request classes. The retained capture implementation supplies no measured
+PDF-read rate threshold or document-only lockout evidence. The 5-second default
+is a conservative local choice, not a provider guarantee or a live qualification.
+Tune it only within the owning provider operation. No new broker login was made
+for this change.
 
 ## Retention and delivery
 

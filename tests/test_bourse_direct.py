@@ -3,6 +3,7 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
+import os
 from pathlib import Path
 import sqlite3
 import threading
@@ -38,7 +39,7 @@ def original(generation, corrected=False):
 def lab(tmp_path, monkeypatch):
     data = SimpleNamespace(generation=0, corrected=False, requests=[], reservations=[],
                            refused=[], pdfs=[], wrong_pdf=False, empty=False,
-                           missing_pdf=False, same_date=False, calendar_delay=0)
+                           missing_pdf=False, same_date=False, calendar_delay=0, oldest_period=None)
     db_path = tmp_path / 'proof.db'
 
     class Portal(BaseHTTPRequestHandler):
@@ -99,6 +100,8 @@ def lab(tmp_path, monkeypatch):
                 time.sleep(data.calendar_delay)
                 nc = query.get('nc', ['1'])[0]
                 year, month = int(query.get('year', ['2026'])[0]), int(query.get('month', ['1'])[0])
+                if data.oldest_period and (year, month) < data.oldest_period:
+                    year, month = 2026, 1
                 links = ''
                 if not data.empty:
                     for day in (2, 2 if data.same_date else 4):
@@ -132,7 +135,7 @@ def lab(tmp_path, monkeypatch):
     thread.start()
     origin = f'http://127.0.0.1:{server.server_port}'
     monkeypatch.setattr(source, 'ORIGIN', origin)
-    monkeypatch.setattr(source, '_rate_limit', lambda page, remaining: remaining())
+    monkeypatch.setattr(source, 'wait_for_request', lambda page, remaining, **kwargs: remaining())
     monkeypatch.setattr(config, 'RUN_DIR', tmp_path / 'runs')
     monkeypatch.setattr(config, 'PROFILE_ROOT', tmp_path / 'profiles')
     monkeypatch.setattr(runner, 'get_totp', lambda url: json.dumps({'data':{'data':'123456'}}))
@@ -142,7 +145,8 @@ def lab(tmp_path, monkeypatch):
     db = Database(db_path)
     db.set_setting('download_dir', str(tmp_path / 'downloads'))
     task_id = db.create_task('BourseDirect', 'synthetic')
-    text = (ROOT/'apps/recipes_playwright/recipe-pw__boursedirect.yaml').read_text().replace('https://www.boursedirect.fr', origin)
+    recipe_path = Path(os.environ.get('BC_TEST_BOURSE_DIRECT_RECIPE', ROOT/'tests/fixtures/bourse_direct.yaml'))
+    text = recipe_path.read_text().replace('https://www.boursedirect.fr', origin)
     ok, error, recipe = recipes.validate_recipe(text)
     assert ok, error
 
@@ -157,12 +161,13 @@ def lab(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, '_launch_browser', launch)
 
-    def run(start=date(2026, 1, 1), mode="all"):
+    def run(start=date(2026, 1, 1), mode="all", *, full_history=False):
         source.select_mode(recipe, mode)
         run_id = db.create_run(task_id)
         ctx = runner._RunContext(db.get_task(task_id), run_id, db, False,
                                  {'user':'synthetic', 'password':'invented', 'otp':'123456'}, 'http://127.0.0.1:9')
-        ctx.bcs.date_context = DateContext(date(2026, 1, 15), start)
+        ctx.bcs.date_context = source.collection_dates(recipe, DateContext(date(2026, 1, 15), start),
+                                                      explicit_start=not full_history)
         result = runner._run_recipe(ctx, recipe)
         if result[1]:
             print('SYNTHETIC_FAILURE', [row['error'] for row in db.list_page_status(run_id)])
@@ -251,21 +256,6 @@ def test_persisted_login_failure_prevents_a_second_submission(lab):
     assert not [r for r in lab.requests if r[0] == 'POST']
 
 
-def test_rate_gate_keeps_at_least_sixty_seconds_between_dispatches(tmp_path, monkeypatch):
-    # Use the actual gate, with a controlled clock; no real sleep or browser.
-    ticks = [1000.0]
-    sleeps = []
-    monkeypatch.setattr(config, 'RUN_DIR', tmp_path)
-    monkeypatch.setattr(source.time, 'time', lambda: ticks[0])
-    def pump(milliseconds):
-        sleeps.append(milliseconds)
-        ticks[0] += milliseconds / 1000
-    page = SimpleNamespace(wait_for_timeout=pump)
-    source._rate_limit(page, lambda: 100_000)
-    ticks[0] += 10
-    source._rate_limit(page, lambda: 100_000)
-    assert sleeps == [50_000]
-    assert json.loads((tmp_path/'bourse-direct-rate.json').read_text())['at'] == 1060
 
 
 @pytest.mark.parametrize('mode', ['all', 'incremental'])
@@ -400,3 +390,65 @@ def test_failure_while_recovering_strict_notice_does_not_block_another_task(lab,
     assert calls == [lab.task_id, other]
     (_, aborted, _), _ = lab.run()
     assert aborted
+
+
+def test_native_adapter_dispatches_separate_configured_request_gates(lab, monkeypatch):
+    gates = []
+    lab.db.set_setting('login_request_interval_seconds', '90')
+    lab.db.set_setting('document_request_interval_seconds', '3')
+
+    def record(page, remaining, **options):
+        assert remaining() > 0
+        gates.append(options)
+
+    monkeypatch.setattr(source, 'wait_for_request', record)
+    (_, aborted, _), rows = lab.run()
+    assert not aborted and len(rows) == 2
+    assert gates == [dict(namespace='bourse-direct-rate', interval=90),
+                     dict(namespace='bourse-direct-document-rate', interval=3),
+                     dict(namespace='bourse-direct-document-rate', interval=3)]
+    # A retained authenticated session does not consume a login gate.
+    gates.clear()
+    (_, aborted, _), rows = lab.run()
+    assert not aborted and len(rows) == 2
+    assert gates == [dict(namespace='bourse-direct-document-rate', interval=3)] * 2
+
+
+def test_invalid_gate_setting_fails_before_login_or_document_requests(lab):
+    lab.db.set_setting('document_request_interval_seconds', 'not-a-delay')
+    (_, aborted, _), rows = lab.run()
+    assert aborted and not rows and not lab.pdfs
+    assert not [r for r in lab.requests if r[0] == 'POST']
+
+
+def test_all_covers_thirteen_months_but_incremental_keeps_recent_window(lab):
+    options = lab.recipe['services'][0]['steps'][1]['methods'][-1]['arguments'][0]
+    options['max_months'] = 13
+    lab.oldest_period = (2025, 1)
+    (_, aborted, _), rows = lab.run(full_history=True)
+    assert not aborted and len(rows) == 26
+    assert {(int(q['year'][0]), int(q['month'][0])) for q, _ in lab.pdfs} == {
+        (2025, month) for month in range(1, 13)} | {(2026, 1)}
+    lab.pdfs.clear()
+    (_, aborted, _), rows = lab.run(mode='incremental', full_history=True)
+    assert not aborted and len(rows) == 2
+    assert {(int(q['year'][0]), int(q['month'][0])) for q, _ in lab.pdfs} == {(2026, 1)}
+    assert all(row['duplicate_of_id'] is not None for row in rows)
+
+
+def test_history_reset_to_current_month_fails_closed(lab):
+    options = lab.recipe['services'][0]['steps'][1]['methods'][-1]['arguments'][0]
+    options['max_months'] = 13
+    lab.oldest_period = (2025, 2)
+    (_, aborted, _), rows = lab.run(full_history=True)
+    assert aborted and len(rows) == 24
+    assert not any(int(q['year'][0]) == 2025 and int(q['month'][0]) == 1 for q, _ in lab.pdfs)
+
+
+def test_explicit_start_overrides_all_and_incremental_without_changing_task_window(lab):
+    options = lab.recipe['services'][0]['steps'][1]['methods'][-1]['arguments'][0]
+    options['max_months'] = 13
+    for mode in ('all', 'incremental'):
+        (_, aborted, _), rows = lab.run(mode=mode)
+        assert not aborted and len(rows) == 2
+    assert lab.db.get_task(lab.task_id)['date_window_days'] == 90

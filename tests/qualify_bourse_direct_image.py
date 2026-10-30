@@ -18,26 +18,31 @@ BOOTSTRAP = r'''
 import hashlib, json, os, shutil, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, '/apps')
+root = Path(tempfile.mkdtemp(prefix='bd-image-proof-'))
+# Configure isolation BEFORE importing modules that capture environment paths.
+for name, relative in {'BC_DATA_DIR':'data', 'BC_DB_DIR':'db', 'BC_DB_FILE':'db/proof.db',
+                       'BC_LOG_DIR':'logs', 'BC_PROFILE_ROOT':'profiles',
+                       'BC_DOWNLOAD_DIR':'downloads', 'HOME':'home'}.items():
+    os.environ[name] = str(root/relative)
 from billcollector import bourse_direct, config, downloads, notice, runner
 import pypdf
 assert os.getuid() == 1003 and os.getgid() == 1000
 assert pypdf.__version__ == '6.21.2'
-root = Path(tempfile.mkdtemp(prefix='bd-image-proof-'))
 shutil.copytree('/checks/tests', root/'tests')
 shutil.copytree('/apps/recipes_playwright', root/'apps/recipes_playwright')
 hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()
-          for name in ('billcollector/bourse_direct.py', 'billcollector/notice.py',
+          for name in ('billcollector/bourse_direct.py', 'billcollector/throttle.py', 'billcollector/notice.py',
                        'billcollector/downloads.py', 'billcollector/runner.py',
-                       'recipes_playwright/recipe-pw__boursedirect.yaml')}
+                       'recipes_playwright/recipe-pw-schema.yaml')}
 print(json.dumps({'packaged_source_sha256':hashes, 'uid':os.getuid(),
                   'gid':os.getgid(), 'pypdf':pypdf.__version__}), flush=True)
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/apps/browser'
-os.environ['BC_BROWSER_DIR'] = '/apps/browser'
 os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
 sys.path.insert(0, '/test-deps')
 import pytest
 code = pytest.main([str(root/'tests/test_bourse_direct.py'),
-                    str(root/'tests/test_notice_identity.py'), '-q',
+                    str(root/'tests/test_notice_identity.py'),
+                    str(root/'tests/test_throttle.py'), '-q',
                     '--basetemp', str(root/'pytest-proof')])
 if code:
     sys.exit(code)
@@ -53,6 +58,7 @@ def main():
     parser.add_argument('--engine', type=Path, required=True)
     parser.add_argument('--proof-dir', type=Path, required=True)
     parser.add_argument('--container-name', required=True)
+    parser.add_argument('--recipe', type=Path, help='Exact public catalog recipe for paired image qualification')
     args = parser.parse_args()
     os.umask(0o077)
     root = args.proof_dir.absolute()
@@ -78,12 +84,18 @@ def main():
                                      capture_output=True, text=True).stdout)[0]
     if image['Config']['Labels']['org.opencontainers.image.revision'] != revision:
         raise ValueError('Image revision differs from the selected engine')
-    command = ['docker', 'create', '--name', args.container_name, '-i',
+    command = ['docker', 'create', '--name', args.container_name, '-i', '--user', '1003:1000',
                '--network', 'none', '--shm-size', '256m',
                '--security-opt', f'seccomp={engine}/docker/chromium-seccomp.json',
                '--mount', f'type=bind,src={engine}/tests,dst=/checks/tests,readonly',
                '--mount', f'type=bind,src={deps},dst=/test-deps,readonly',
                '--entrypoint', 'python3', args.image, '-']
+    recipe_hash = None
+    if args.recipe is not None:
+        recipe = args.recipe.resolve(strict=True)
+        recipe_hash = hashlib.sha256(recipe.read_bytes()).hexdigest()
+        command[-2:-2] = ['--mount', f'type=bind,src={recipe},dst=/catalog-recipe.yaml,readonly',
+                         '--env', 'BC_TEST_BOURSE_DIRECT_RECIPE=/catalog-recipe.yaml']
     container = subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
     (root/'bootstrap.py').write_text(BOOTSTRAP)
     with (root/'container.log').open('w') as log:
@@ -92,16 +104,17 @@ def main():
     state = json.loads(subprocess.run(['docker', 'inspect', container], check=True,
                                      capture_output=True, text=True).stdout)[0]
     hashes = {name: hashlib.sha256((engine/'apps'/name).read_bytes()).hexdigest()
-              for name in ('billcollector/bourse_direct.py', 'billcollector/notice.py',
+              for name in ('billcollector/bourse_direct.py', 'billcollector/throttle.py', 'billcollector/notice.py',
                            'billcollector/downloads.py', 'billcollector/runner.py',
-                           'recipes_playwright/recipe-pw__boursedirect.yaml')}
+                           'recipes_playwright/recipe-pw-schema.yaml')}
     log_text = (root/'container.log').read_text()
     packaged = next((json.loads(line)['packaged_source_sha256'] for line in log_text.splitlines()
                      if line.startswith('{"packaged_source_sha256"')), None)
     proof = {'image_id': state['Image'], 'engine_revision': revision, 'container_id': container,
              'exit_code': state['State']['ExitCode'], 'start_exit_code': result.returncode,
              'packaged_source_matches_checkout': packaged == hashes,
-             'network': state['HostConfig']['NetworkMode'], 'container_retained': True}
+             'network': state['HostConfig']['NetworkMode'], 'container_retained': True,
+             'catalog_recipe_sha256': recipe_hash}
     (root/'result.json').write_text(json.dumps(proof, indent=2))
     print(json.dumps(proof))
     if result.returncode or proof['exit_code'] or packaged != hashes:

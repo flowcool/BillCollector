@@ -72,6 +72,16 @@ The task's explicit recipe path can differ from the service-derived filename.
 The recipe selects the portal URL; a vault item's URI does not select it.
 Preserve optional-TOTP behavior and fresh TOTP retrieval through this same client.
 
+## Catalog ownership
+
+Provider recipes come from `flowcool/billcollector-recipes`. The engine no
+longer packages the Bourse Direct deployment recipe; its retained YAML is a
+synthetic test fixture under `tests/fixtures/`. Infra must install the reviewed
+catalog and set the existing task recipe_file to the exported
+`/apps/recipes_playwright/recipe-pw__bourse_direct.yaml` path. Existing mounted
+files are not deleted by an image update. Preserve the task service/user pair,
+DB and journal identities. Do not create a second task to adopt the filename.
+
 ## Recipe schema promotion
 
 The image contains the release schema at
@@ -131,7 +141,9 @@ rows to make an old binary start.
 
 `date_window_days` includes the run-start day. `--date-from-stdin` overrides the
 start for one run; the end is the captured current date in `TZ` (default `UTC`).
-Provider monthly traversal can include a complete first partial month. Use the
+Bourse Direct Download All uses the catalog recipe max_months (13 for the new
+catalog candidate). Incremental keeps date_window_days; explicit start wins for
+both modes. Provider monthly traversal can include a complete first partial month. Use the
 provider guide to state the actual coverage rather than claiming a day filter.
 
 ## Settings and environment
@@ -140,6 +152,8 @@ provider guide to state the actual coverage rather than claiming a day filter.
 | --- | --- |
 | Settings `download_dir` | `/apps/paperless-consume` for this integration; global non-empty value wins over `BC_DOWNLOAD_DIR`. |
 | Settings `vault_api_url`, `vault_api_host` | Non-empty values override `BW_API_URL`, `BW_API_HOST` respectively. |
+| Settings `login_request_interval_seconds` | Generic login gate interval, 60–3600 seconds for the Bourse Direct caller; default 60. Existing durable login clock is retained. |
+| Settings `document_request_interval_seconds` | Generic document gate interval, 0.1–3600 seconds; default 5. Separate durable timestamp; all waits remain within the run deadline. Other adapters must explicitly opt into these engine primitives. |
 | Settings `ntfy_topic` | Explicit opt-in destination; absent or blank means no notification. |
 | Environment `NTFY_HOST` | Set `http://<HOST_IP>:7979` for the self-hosted receiver. Otherwise the existing default is public `https://ntfy.sh`. |
 | Environment `TZ` | Explicit deployment timezone for cron and run dates. |
