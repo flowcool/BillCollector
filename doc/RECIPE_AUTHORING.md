@@ -1,5 +1,10 @@
 # Write and verify a recipe
 
+Provider qualification and Infra delivery use the
+[shared runtime contract](INFRA_RUNTIME_CONTRACT.md). Complete its handoff
+fields and state every harness bypass. Synthetic recipe proof does not qualify
+the bypassed vault, runtime or archive interface.
+
 Use the daemon's [method contract](RECIPE_METHODS.md) and
 [phased-login contract](SAFE_LOGIN.md). This guide explains how to use them.
 The installed fork implementation is the execution authority. A contract requirement

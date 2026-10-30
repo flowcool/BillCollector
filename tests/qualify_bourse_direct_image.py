@@ -1,4 +1,10 @@
-"""Test a local BD image without network or live mounts. Keep the proof container."""
+"""Test a local BD image without network or live mounts. Keep the proof container.
+
+Qualification boundary: synthetic fixtures inject credentials/TOTP and test
+consumers. This does not qualify the daemon's real vault preflight/transport,
+provider selectors, Infra consume mounts or Paperless permissions/readback.
+See doc/INFRA_RUNTIME_CONTRACT.md for daemon-path proof and the handoff template.
+"""
 import argparse
 import hashlib
 import importlib.util

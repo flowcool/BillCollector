@@ -20,6 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- One Infra runtime contract for consume-folder delivery, exact vault lookup,
+  schema promotion, DB/configuration handoffs and daemon-path qualification.
+  Provider docs and harness boundaries now refer to it. No runtime, recipe-schema
+  or database migration changes are introduced by this documentation release.
+
 - Opt-in daemon terminal ntfy pushes (`ntfy_topic`) for failed, interrupted and
   attention-timeout runs. Shutdown, dashboard Stop and startup orphan recovery
   notify too. Success and pause cancellation stay silent. Fixed terminal

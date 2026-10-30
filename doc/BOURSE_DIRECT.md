@@ -1,8 +1,10 @@
 # Bourse Direct local delivery
 
-Owner: `infra-8xzcb`. Operational consumer: `infra-1lr1.3`.
+Owner: `infra-8xzcb`. Infra owner: `infra-1lr1.3`.
 The BillCollector workspace owns the approved behavior specification and local
-delivery receipt in `docs/`. This file defines the runtime configuration contract.
+delivery receipt in `docs/`. The [Infra runtime contract](INFRA_RUNTIME_CONTRACT.md) defines shared configuration,
+folder delivery, vault transport, schema promotion and handoff requirements.
+This guide adds Bourse Direct behavior only.
 
 ## Scope and authority
 
@@ -18,24 +20,24 @@ containers or proof is included. Preserve CC Genevois and Sunday 04:17.
 
 ## Selected implementation
 
-Use engine `45e530b7d6240abb308810183dbe4f65aae5b6dc` plus the focused local
-port in `tmp/bd-local-delivery`. The generic engine alone has no Bourse Direct
-modules. Reuse provider and notice-revision code from candidate `3110157` in
-`tmp/bd-recipe-52`. Keep that candidate and `tmp/bd-recipe-live-52` intact.
-The selected engine's journal, source keys, unpacking, vault UUID lookup,
-sandbox and other provider mechanisms remain in place.
+Use a pinned fork image from `playwright-next` that includes the Bourse Direct
+modules and recipe. They were integrated in fork PR #76. State the exact image,
+recipe and schema hashes in the Infra handoff. Keep historical candidate
+`3110157` and its private two-pass proof intact; they are not the current runtime
+or proof of the daemon/Infra interfaces. The engine journal, source keys,
+unpacking, vault id lookup and sandbox remain in use.
 
 Native `download_all` defaults to full acquisition. Its `incremental: true`
 option skips known source keys. The native contract says it does not revisit
 corrections (`doc/RECIPE_METHODS.md`). Bourse Direct's daily source identifier
 has no content revision. Therefore both Bourse Direct actions must fetch the
 offered original again before revision comparison. They use the same native
-incremental boolean, task, date context, tracker and consumer hook. They never
+incremental boolean, task, date context, tracker and folder publication path. They never
 use source-key presence alone to discard a notice.
 
 ## Configuration and invocation
 
-Use the selected engine's `doc/BOURSE_DIRECT.md` for the complete contract.
+Apply the shared [runtime contract](INFRA_RUNTIME_CONTRACT.md) before configuring the task.
 One native task selects one offered account. `account_type` is `PEA` by default;
 `PEA-PME` is supported in isolated tests only. Set the task's `recipe_file` to
 `/apps/recipes_playwright/recipe-pw__boursedirect.yaml`. Use the same task ID for
@@ -71,17 +73,21 @@ filter. `max_months=12`, `max_items=100`, `timeout_ms=7200000` bound this recipe
 Missing month/account evidence stops collection. A generic empty month retains
 the selected engine's existing empty-run result.
 
-Use private persistent retention as `download_dir`. Never point this directory
-at Paperless consume. Infra connects the consumer hook to its versioned delivery
-path. No consumer means local retention only; `consumed` is not a Paperless receipt.
+Set the global `download_dir` to `/apps/paperless-consume` as specified in the
+[runtime contract](INFRA_RUNTIME_CONTRACT.md#delivery-to-paperless). Infra mounts
+the Paperless consume directory there. The shipped consumer registry stays empty;
+there is no configurable consumer hook. Infra's Paperless consumption workflow
+filters `BourseDirect_*.pdf` and sets owner, exact Source `Bourse Direct`, and reader
+permissions. Infra verifies the archived original and those fields independently.
+`consumed` records local publication, not a Paperless receipt.
 
 ## Retention and delivery
 
 Both actions enumerate all offered notices in the selected account/window.
-They keep the first untouched original and each distinct content revision.
+They publish the first untouched original and each distinct content revision.
 An unchanged or bounded metadata-regenerated repeat creates an audit row but no
-new retained file or consumer call. Changed content under an existing source ID
-creates a new retained original and one new delivery obligation. Equal text or
+new published file. Changed content under an existing source ID
+publishes a new original for the consume-folder workflow. Equal text or
 filename alone never establishes identity. See `doc/NOTICE_IDENTITY.md`.
 
 An already retained notice is not automatically sent again. An already delivered
@@ -91,11 +97,13 @@ Do not seed this database from an old collector or Paperless listing without a
 separate reviewed mapping. The retained real qualification database is proof,
 not a production-state migration input.
 
-A new notice commits journal and DB intent before publication. Before calling
-any consumer, it commits `delivery_uncertain`. Success completes local delivery.
+A new notice commits journal and DB intent before publication. The strict
+Bourse Direct delivery policy commits `delivery_uncertain` before completing the
+delivery phase. With the shipped empty consumer registry, that phase completes
+local publication immediately. It does not wait for Paperless ingestion.
 A timeout, crash or exception leaves that state and preserves the original.
 Startup recovery skips that uncertain row. Both Bourse Direct actions stop.
-Other providers can continue. No automatic consumer or original-request replay
+Other providers can continue. No automatic delivery or original-request replay
 resolves uncertainty. A staged file can finish local publication once, using the
 selected engine journal; the acquisition key still requires reconciliation.
 
@@ -103,7 +111,14 @@ Infra must inspect the original and external result. For a confirmed Paperless
 arrival, retain a private JSON receipt with `original_sha256`, positive integer
 `paperless_document_id`, `source: Bourse Direct`, and boolean readback fields
 `original_readback`, `owner_readback`, `reader_readback`, all true. Infra must
-obtain those readbacks; the acknowledgement command does not query Paperless:
+obtain those readbacks; the acknowledgement command does not query Paperless.
+The command also requires matching original bytes at the Download `saved_path`.
+If the consume watcher already removed that file, this command cannot acknowledge
+the row as-is. Stop and use an Infra-reviewed recovery that preserves the original
+and receipt; do not resend, recreate the file in consume, or clear pending state
+merely to satisfy this precondition.
+
+This recovery command is not a normal consume-folder ingestion step.
 
 ```sh
 python3 -m billcollector.bourse_direct_delivery --task "$TASK_ID" \
@@ -118,15 +133,19 @@ An unmatched acquisition key also requires inspection. Never clear it blindly.
 
 ## Evidence and limits
 
-The selected engine is tested through its actual YAML and daemon on a loopback
-portal. Both modes cover first acquisition, repeat suppression, regeneration,
+The synthetic tests exercise the selected YAML and runner code against a
+loopback portal, with injected credentials/TOTP and test consumers. They bypass
+native vault preflight/transport and the real Infra/Paperless delivery path. Both modes cover first acquisition, repeat suppression, regeneration,
 content correction, original bytes, failure before publication, crash after an
 external effect, timeout without automatic replay, verified-receipt recovery,
 and isolation from another provider. Account selection and year rollover are
-isolated tests. These are not live-source or Paperless proofs.
+isolated tests. These are not live-source, deployed-vault or Paperless proofs. Use the runtime
+contract's daemon-path rule for a real qualification and declare every bypass.
 
 Real-source proof remains candidate `3110157` (runtime `9bda8bc`, same apps/doc
 content): five PEA originals, then zero new and five duplicates; no consumer.
+That historical workspace harness injected credentials from a sibling reader;
+it did not qualify `vault_transport`, native preflight or daemon orchestration.
 Coverage is the current month at that qualification, October 2026. It does not
 qualify PEA-PME, historical months, a real correction, interrupted Paperless
 delivery or a fresh live run of the new selected artifact.
