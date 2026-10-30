@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `download_all` options `incremental` (persisted per-task source keys; later runs
+  skip known keys) and `unpack: pdf` (publish the single PDF member of a ZIP).
+  Downloads gain an additive `source_key` column.
 - Input-triggered protected login submissions (issue #36) and bounded
   replacement calendars (issue #37) are now integrated in public upstream.
   The fork retains its existing implementations.

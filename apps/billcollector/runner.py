@@ -517,14 +517,18 @@ def _collection_actions(ctx, step=None):
     def paginate(locator, options):
         return collection.click_until_absent(ctx.page, locator, options)
 
-    def save_download(download):
+    def save_download(download, *, source_key=None, unpack=None):
         filename = str(download.suggested_filename)
-        if filename in collection_filenames:
+        # An unpacked archive name is a transport name, not document identity.
+        if unpack is None and filename in collection_filenames:
             raise collection.CollectionError(
                 "collection produced a duplicate suggested filename"
             )
+        options = {k: v for k, v in
+                   {"source_key": source_key, "unpack": unpack}.items()
+                   if v is not None}
         record = downloads.track_download(
-            download, ctx.run_id, ctx.task, ctx.db
+            download, ctx.run_id, ctx.task, ctx.db, **options
         )
         collection_filenames.add(filename)
         ctx.files_downloaded.append({
@@ -535,6 +539,11 @@ def _collection_actions(ctx, step=None):
         return record
 
     def download(locator, options):
+        if isinstance(options, dict) and options.get("incremental") is True:
+            prefix = collection.source_key(options.get("key_attribute"), "")
+            completed_keys.update(
+                key[len(prefix):] for key in ctx.db.known_source_keys(ctx.task["id"])
+                if key.startswith(prefix))
         return collection.download_all(
             ctx.page,
             ctx.context,
@@ -542,6 +551,7 @@ def _collection_actions(ctx, step=None):
             save_download,
             options,
             completed_keys=completed_keys,
+            keyed_save=True,
         )
 
     def replacement_calendar(root, options):

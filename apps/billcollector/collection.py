@@ -344,8 +344,14 @@ def _download_one(page, context, target, save_download, index, count,
                 )
 
 
+def source_key(key_attribute, key):
+    """Persisted identity of one keyed item for incremental collection."""
+    return f"{key_attribute}={key}"
+
+
 def download_all(page, context, locator, save_download, options,
-                 *, completed_keys=None, before_download=None, deadline=None):
+                 *, completed_keys=None, before_download=None, deadline=None,
+                 keyed_save=False):
     """Download every item from one stable, explicitly keyed locator.
 
     The initial ordered key set is the contract for the whole action.  The
@@ -353,13 +359,26 @@ def download_all(page, context, locator, save_download, options,
     checked immediately before use, so re-rendering is supported but shrink,
     reorder, replacement and ambiguous controls fail closed.  Successfully
     persisted records remain committed when a later item fails.
+
+    ``incremental`` and ``unpack`` need a runner that persists source keys
+    (``keyed_save``): ``save_download`` then receives ``source_key`` and
+    ``unpack`` keywords, and known keys arrive through ``completed_keys``.
     """
     options = _options(
         options,
         names={
             "key_attribute", "max_items", "timeout_ms", "event_window_ms",
+            "incremental", "unpack",
         },
     )
+    incremental = options.get("incremental", False)
+    if not isinstance(incremental, bool):
+        raise CollectionError("incremental must be a boolean")
+    unpack = options.get("unpack")
+    if unpack not in (None, "pdf"):
+        raise CollectionError("unpack must be 'pdf'")
+    if (incremental or unpack) and not keyed_save:
+        raise CollectionError("incremental and unpack are not supported by this runner")
     key_attribute = options.get("key_attribute")
     if not isinstance(key_attribute, str) or not key_attribute.strip():
         raise CollectionError("key_attribute must be a non-empty string")
@@ -426,7 +445,15 @@ def download_all(page, context, locator, save_download, options,
                 before_download()
 
             def save_completed(download):
-                record = save_download(download)
+                if keyed_save:
+                    record = save_download(
+                        download,
+                        source_key=(source_key(key_attribute, expected_key)
+                                    if incremental else None),
+                        unpack=unpack,
+                    )
+                else:
+                    record = save_download(download)
                 completed_keys.add(expected_key)
                 return record
 

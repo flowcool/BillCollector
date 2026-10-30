@@ -15,6 +15,7 @@ import sqlite3
 # Fixed child interpreter/module, argument list, and no shell.
 import subprocess  # nosec B404
 import sys
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -37,6 +38,7 @@ class _RecoveryFailure(OSError):
 
 
 _CHUNK = 1024 * 1024
+MAX_UNPACKED_BYTES = 100 * 1024 * 1024
 _FIELDS = ("run_id", "task_id", "url", "filename", "size", "sha256", "saved_path")
 
 
@@ -47,6 +49,46 @@ def sha256_of(path):
         for chunk in iter(lambda: fh.read(_CHUNK), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _unpack_pdf(staged):
+    """Replace a staged ZIP by its single PDF member; return the member name.
+
+    The member bytes are kept unchanged. Anything but exactly one regular PDF
+    member with a plain name fails closed before any publication.
+    """
+    try:
+        archive = zipfile.ZipFile(staged)
+    except zipfile.BadZipFile as error:
+        raise ValueError("unpack: pdf expects a ZIP download") from error
+    with archive:
+        members = [m for m in archive.infolist() if not m.is_dir()]
+        if len(members) != 1:
+            raise ValueError(f"unpack: pdf expects one file member, found {len(members)}")
+        member = members[0]
+        name = member.filename
+        if (Path(name).name != name or name in ("", ".", "..", ".billcollector")
+                or "\\" in name or not name.lower().endswith(".pdf")):
+            raise ValueError("unpack: pdf member name is not a plain .pdf filename")
+        if member.file_size > MAX_UNPACKED_BYTES:
+            raise ValueError("unpack: pdf member exceeds the size limit")
+        unpacked = staged.with_name("unpacked")
+        with archive.open(member) as source, unpacked.open("xb") as target:
+            written = 0
+            for chunk in iter(lambda: source.read(_CHUNK), b""):
+                written += len(chunk)
+                if written > MAX_UNPACKED_BYTES:
+                    raise ValueError("unpack: pdf member exceeds the size limit")
+                target.write(chunk)
+            target.flush()
+            os.fsync(target.fileno())
+    with unpacked.open("rb") as stream:
+        if stream.read(5) != b"%PDF-":
+            unpacked.unlink()
+            raise ValueError("unpack: pdf member is not a PDF document")
+    os.replace(unpacked, staged)
+    _sync_dir(staged.parent)
+    return name
 
 
 def download_dir(db):
@@ -109,6 +151,13 @@ def _clean_journal(entry):
     _sync_dir(entry.parent)
 
 
+def _clean_journal_tree(entry):
+    for name in ("document", "unpacked"):
+        (entry / name).unlink(missing_ok=True)
+    entry.rmdir()
+    _sync_dir(entry.parent)
+
+
 def _quarantine(entry):
     quarantine = entry.parent / "quarantine"
     quarantine.mkdir(exist_ok=True)
@@ -162,7 +211,8 @@ def _recover_locked(db, target):
                     # Conservative recovery of publication without its row:
                     # do not replay an unknown external consumer effect.
                     db.insert_download(**{k: metadata[k] for k in _FIELDS},
-                                       staged_path=str(staged), state="consumed")
+                                       staged_path=str(staged), state="consumed",
+                                       source_key=metadata.get("source_key"))
                     _clean_journal(entry)
                 else:
                     _quarantine(entry)
@@ -196,9 +246,11 @@ def recover_downloads(db):
             _recover_locked(db, target)
 
 
-def track_download(download, run_id, task, db):
+def track_download(download, run_id, task, db, *, source_key=None, unpack=None):
     """Stage one Playwright Download, commit intent, publish, then deliver.
 
+    ``source_key`` records the collection key for incremental runs.
+    ``unpack="pdf"`` publishes the single PDF member of a ZIP download.
     Existing same-task hashes retain an audit row without another publication.
     Consumer failures remain pending and do not fail the recipe. Filesystem or
     database errors propagate to the runner; recovery precedes any later save.
@@ -221,11 +273,21 @@ def track_download(download, run_id, task, db):
         download.save_as(str(staged))
         with staged.open("rb") as stream:
             os.fsync(stream.fileno())
+        if unpack == "pdf":
+            try:
+                filename = _unpack_pdf(staged)
+            except Exception:
+                _clean_journal_tree(entry)
+                raise
+        elif unpack is not None:
+            _clean_journal_tree(entry)
+            raise ValueError(f"unsupported unpack mode: {unpack}")
         sha = sha256_of(staged)
         record = {
             "run_id": run_id, "task_id": task["id"],
             "url": sanitize_url(str(download.url)), "filename": filename,
             "size": staged.stat().st_size, "sha256": sha,
+            "source_key": source_key,
         }
         existing = db.find_download_by_sha(task["id"], sha)
         if existing is not None:
