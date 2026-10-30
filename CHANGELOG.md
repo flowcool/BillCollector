@@ -11,6 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Input-triggered protected login submissions (issue #36) and bounded
+  replacement calendars (issue #37) are now integrated in public upstream.
+  The fork retains its existing implementations.
+- Legacy database storage is created when opened, rather than on helper
+  import. The daemon can start with an unwritable application tree and
+  configured writable runtime paths (upstream PR #42).
+
 - Daemon `replacement_calendar` recipe action for monthly replacement lists.
   It follows offered previous-month controls over the run-start date window,
   verifies identity/readiness and explicit empty states, and applies shared
