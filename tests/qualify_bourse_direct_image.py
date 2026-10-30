@@ -54,6 +54,7 @@ def main():
     parser.add_argument('--engine', type=Path, required=True)
     parser.add_argument('--proof-dir', type=Path, required=True)
     parser.add_argument('--container-name', required=True)
+    parser.add_argument('--recipe', type=Path, help='Exact public catalog recipe for paired image qualification')
     args = parser.parse_args()
     os.umask(0o077)
     root = args.proof_dir.absolute()
@@ -85,6 +86,12 @@ def main():
                '--mount', f'type=bind,src={engine}/tests,dst=/checks/tests,readonly',
                '--mount', f'type=bind,src={deps},dst=/test-deps,readonly',
                '--entrypoint', 'python3', args.image, '-']
+    recipe_hash = None
+    if args.recipe is not None:
+        recipe = args.recipe.resolve(strict=True)
+        recipe_hash = hashlib.sha256(recipe.read_bytes()).hexdigest()
+        command[-2:-2] = ['--mount', f'type=bind,src={recipe},dst=/catalog-recipe.yaml,readonly',
+                         '--env', 'BC_TEST_BOURSE_DIRECT_RECIPE=/catalog-recipe.yaml']
     container = subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
     (root/'bootstrap.py').write_text(BOOTSTRAP)
     with (root/'container.log').open('w') as log:
@@ -102,7 +109,8 @@ def main():
     proof = {'image_id': state['Image'], 'engine_revision': revision, 'container_id': container,
              'exit_code': state['State']['ExitCode'], 'start_exit_code': result.returncode,
              'packaged_source_matches_checkout': packaged == hashes,
-             'network': state['HostConfig']['NetworkMode'], 'container_retained': True}
+             'network': state['HostConfig']['NetworkMode'], 'container_retained': True,
+             'catalog_recipe_sha256': recipe_hash}
     (root/'result.json').write_text(json.dumps(proof, indent=2))
     print(json.dumps(proof))
     if result.returncode or proof['exit_code'] or packaged != hashes:
