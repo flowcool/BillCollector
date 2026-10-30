@@ -11,6 +11,8 @@ import asyncio
 import sys
 import tempfile
 import unittest
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps"))
@@ -19,6 +21,29 @@ from billcollector import scheduler  # noqa: E402
 from billcollector.db import Database  # noqa: E402
 from billcollector.scheduler import TaskScheduler, job_id_for  # noqa: E402
 
+
+class CronWeekdayTests(unittest.TestCase):
+    def test_numeric_sunday_and_named_sunday_have_the_same_next_fire(self):
+        zone = ZoneInfo("Europe/Zurich")
+        start = datetime(2026, 10, 30, tzinfo=zone)
+        expected = datetime(2026, 11, 1, 4, 17, tzinfo=zone)
+        for day in ("0", "7", "sun", "0,7"):
+            with self.subTest(day=day):
+                trigger = scheduler.cron_trigger(f"17 4 * * {day}", zone)
+                self.assertEqual(trigger.get_next_fire_time(None, start), expected)
+
+    def test_numeric_ranges_lists_and_steps_follow_cron_numbering(self):
+        zone = ZoneInfo("UTC")
+        sunday = datetime(2026, 11, 1, tzinfo=zone)
+        for day, expected in (("1-5", 2), ("1,3,5", 2), ("0-6/2", 1), ("*/2", 1), ("6-7", 1), ("sun,1", 1)):
+            with self.subTest(day=day):
+                trigger = scheduler.cron_trigger(f"0 0 * * {day}", zone)
+                self.assertEqual(trigger.get_next_fire_time(None, sunday).day, expected)
+
+    def test_invalid_numeric_weekdays_are_rejected(self):
+        for day in ("8", "7-1", "1/2", "*/0", "1-5/0"):
+            with self.subTest(day=day), self.assertRaises(ValueError):
+                scheduler.cron_trigger(f"0 0 * * {day}")
 
 class SchedulerTestBase(unittest.TestCase):
     def setUp(self):
@@ -55,6 +80,17 @@ class SchedulerTestBase(unittest.TestCase):
 
 class JobSyncTests(SchedulerTestBase):
     """resync()/sync_task() keep the job table in step with the Task table."""
+
+    def test_legacy_invalid_crons_do_not_stop_other_tasks_at_startup(self):
+        bad = [self.db.create_task("bad", f"u{i}", enabled=True, cron=f"0 0 * * {day}")
+               for i, day in enumerate(("1/2", "mon-5", "01", "*/02"))]
+        good = self.db.create_task("good", "u", enabled=True, cron="0 0 1 * *")
+        with self.assertLogs("billcollector.scheduler", level="ERROR") as logs:
+            jobs = self._start_stop_cycle()
+        self.assertEqual(jobs, [job_id_for(good)])
+        for task_id in bad:
+            self.assertTrue(any(f"Task {task_id} not scheduled: invalid cron" in line for line in logs.output))
+            self.assertTrue(self.db.get_task(task_id)["enabled"])
 
     def test_enabled_task_with_cron_produces_a_job(self):
         task_id = self.db.create_task("svc", "u1", enabled=True, cron="0 0 1 * *")
