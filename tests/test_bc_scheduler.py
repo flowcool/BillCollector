@@ -81,6 +81,17 @@ class SchedulerTestBase(unittest.TestCase):
 class JobSyncTests(SchedulerTestBase):
     """resync()/sync_task() keep the job table in step with the Task table."""
 
+    def test_legacy_invalid_crons_do_not_stop_other_tasks_at_startup(self):
+        bad = [self.db.create_task("bad", f"u{i}", enabled=True, cron=f"0 0 * * {day}")
+               for i, day in enumerate(("1/2", "mon-5", "01", "*/02"))]
+        good = self.db.create_task("good", "u", enabled=True, cron="0 0 1 * *")
+        with self.assertLogs("billcollector.scheduler", level="ERROR") as logs:
+            jobs = self._start_stop_cycle()
+        self.assertEqual(jobs, [job_id_for(good)])
+        for task_id in bad:
+            self.assertTrue(any(f"Task {task_id} not scheduled: invalid cron" in line for line in logs.output))
+            self.assertTrue(self.db.get_task(task_id)["enabled"])
+
     def test_enabled_task_with_cron_produces_a_job(self):
         task_id = self.db.create_task("svc", "u1", enabled=True, cron="0 0 1 * *")
         self.sched.resync()

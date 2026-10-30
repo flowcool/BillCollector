@@ -152,9 +152,14 @@ class TaskScheduler:
     def _add_job_for(self, task) -> None:
         if not task["enabled"] or not task["cron"]:
             return
+        try:
+            trigger = cron_trigger(task["cron"], timezone=self._timezone)
+        except ValueError as exc:
+            logger.error("Task %s not scheduled: invalid cron (%s)", task["id"], exc)
+            return
         self._scheduler.add_job(
             _task_job,
-            trigger=cron_trigger(task["cron"], timezone=self._timezone),
+            trigger=trigger,
             args=[task["id"]],
             id=job_id_for(task["id"]),
             replace_existing=True)

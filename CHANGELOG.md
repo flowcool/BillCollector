@@ -9,6 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Numeric cron weekdays now use cron numbering (`0`/`7` Sunday, `1` Monday).
+  Review numeric schedules before upgrading. The stricter parser rejects legacy
+  forms `1/2`, `mon-5`, `01` and `*/02`; use explicit named days or unpadded
+  ascending numeric ranges/steps. Invalid stored schedules are skipped and
+  logged with their task ID, while valid tasks still start. Use named weekdays
+  to preserve the intended day when rolling back to an older image.
+
 ### Added
 
 - `download_all` options `incremental` (persisted per-task source keys; later runs

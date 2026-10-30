@@ -241,6 +241,11 @@ Other fields retain APScheduler's semantics, including combined day-of-month and
 day-of-week constraints. Before upgrading from an older daemon, review numeric
 weekday schedules: those versions interpreted `0` as Monday. Use named weekdays
 when rolling back to an older image to preserve the intended day.
+The stricter numeric parser rejects legacy forms such as `1/2`, `mon-5`, `01`
+and `*/02`. Rewrite them with explicit named days or unpadded ascending numeric
+ranges/steps. An invalid stored task is omitted from scheduling and logged with
+its task ID and reason; other tasks still start. Its database settings remain
+unchanged. Correct it through the task editor before relying on its schedule.
 
 ### Environment Variables
 
