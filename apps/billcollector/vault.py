@@ -160,7 +160,7 @@ def fetch_credentials(api_url, service, user):
     """Resolve the portal credentials of one task from the vault.
 
     The item name is the name-based link ``<service> <user>`` (decision 7).
-    Returns ``{"user", "password", "otp", "url"}``; ``otp`` is None when the
+    Returns ``{"item_id", "user", "password", "otp", "url"}``; ``otp`` is None when the
     item has no TOTP entry, ``url`` is the item's first login URI
     (informational - the recipe's goto step holds the URL the engine visits).
     Raises VaultAPIError on any real failure.

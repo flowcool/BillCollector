@@ -22,7 +22,7 @@ Compose service includes a pinned seccomp profile. See
     - [Vault of Secrets](#vault-of-secrets)
     - [Enabling DNS and HTTPS with Let's Encrypt certs](#enabling-dns-and-https-with-lets-encrypt-certs)
   - [Installing the Daemon](#installing-the-daemon)
-  - [Pause notifications (ntfy)](#pause-notifications-ntfy)
+  - [Notifications (ntfy)](#notifications-ntfy)
 - [Daemon Mode](#daemon-mode)
   - [Environment Variables](#environment-variables)
   - [Container Semantics](#container-semantics)
@@ -224,7 +224,7 @@ Now that we have done a good job installing all the prerequisites, we are focusi
 
 8. Collect your first document: on the **Dashboard** press **Run now** for an enabled task - watch the run live (session page, noVNC tab) until it reaches `success`; the document appears on the Downloads page and in the consumer folder. Every step is driven from the browser, no shell access to the daemon needed.
 
-### Pause notifications (ntfy)
+### Notifications (ntfy)
 
 A fresh installation sends no notifications: the `ntfy topic` setting (`ntfy_topic` in Settings) starts empty. Paused runs, blocked logins, and failed or interrupted daemon runs only push when you set a topic. To opt in, open **Settings** and set an **ntfy topic** - choose your own topic name, it is the install-specific destination the pushes are sent to.
 
@@ -356,7 +356,7 @@ The BillCollector configuration for each web service from which you want to retr
      - One recipe per web portal identified by the yaml element `serviceName` and its filename `recipe-pw__<serviceName>`.
      - Each recipe is structured in numbered `steps`, executed in ascending `step` order.
      - Each step is a chain of `methods`: Playwright Page/Locator calls executed in order. Locator methods (`locator` for CSS selectors, `get_by_role`, `get_by_label`, `get_by_text`, `get_by_title`, `get_by_placeholder`, `get_by_test_id`) yield a locator that is chained into the following action (`click`, `fill`, `press`, `first`). Page-level methods include `goto` (open the start URL), `content_frame` (enter an iframe) and `close`.
-     - Downloads: a step with the `expect_download` method wraps the nested `steps` that trigger the download; the file is saved into the Downloads folder. A re-downloaded file that is byte-identical to one already tracked for the same task (same sha256) is recorded as a duplicate and the consumer hook is not re-run for it.
+     - Downloads: a step with the `expect_download` method wraps the nested `steps` that trigger the download; the file is saved into the Downloads folder. A re-downloaded file that is byte-identical to one already tracked for the same task (same sha256) is recorded as a duplicate and the consumer hook is not re-run for it. An opt-in `notice_identity` step option switches a download step from byte-hash deduplication to source-scoped identity plus a conservative PDF revision digest; see [notice identity](doc/NOTICE_IDENTITY.md).
      - Bounded pagination: use one page locator followed by `click_until_absent`. Its single options object requires `progress_selector`, `max_clicks`, and `timeout_ms`. `timeout_ms` is the total browser-action budget. Every click must increase the visible progress count or make the pager absent or hidden. This action supports cumulative "load more" controls. It rejects page-replacement pagination and virtualized lists because their visible item count does not increase. For monthly replacement calendars, use the daemon's [replacement_calendar action](doc/REPLACEMENT_CALENDARS.md).
      - Bounded collections: use one page locator followed by `download_all`. Its single options object requires `key_attribute`, `max_items`, `timeout_ms`, and `event_window_ms`. `timeout_ms` bounds the browser actions and observations for the whole collection. Persistence (`save_as`, hashing, consumers, and SQLite) remains synchronous and cannot be preempted by that browser deadline. `event_window_ms` is the full attribution window observed after each click, so `timeout_ms` must exceed the actual item count multiplied by `event_window_ms`, with additional time for browser actions. The engine reports the required and remaining budgets before its first click when the minimum attribution-window budget cannot fit. The key must be non-empty and unique for every item. The ordered key set must remain stable while each control produces exactly one download. `download_all` also rejects a suggested filename already saved earlier in the run instead of overwriting it.
      - Incremental collections: `"incremental": true` in the `download_all` options records each item key (`<key_attribute>=<key>`) with its download. Later runs of the same task skip known keys without clicking them, so only the first run collects everything. Use it only with a key that is stable per document across sessions (for example an invoice number); a constant or session-bound key misses or repeats documents. `"unpack": "pdf"` publishes the single PDF member of a ZIP download unchanged under its member name and deduplicates on the PDF; any other archive content fails without publication. Both options require the daemon runner.

@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Update pypdf to 6.21.4 for seven security fixes. Align the packaged image
+  qualifier and parser documentation; preserve the `pdf-graph-v1` revision rule.
+
 - Separate durable login and document request pacing via generic engine gates. Preserve the Bourse Direct 60-second login floor; configure document pacing through Settings (default 5 seconds). No DB or recipe schema change.
 - Download All uses the recipe history limit; incremental collection keeps its
   task date window. Install the Bourse Direct recipe from the recipe catalog.

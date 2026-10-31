@@ -219,5 +219,13 @@ class PersistenceTests(SchedulerTestBase):
         self.assertEqual(self.calls, [task_id])
 
 
+def test_ui_and_scheduler_share_numeric_weekday_validation():
+    from billcollector.ui.tasks import _valid_cron
+    for day in ('0', '7', 'sun', '1-5', '*/2'):
+        assert _valid_cron(f'17 4 * * {day}')
+    for day in ('8', '1/2', 'mon-5', '01', '*/02'):
+        assert not _valid_cron(f'17 4 * * {day}')
+
+
 if __name__ == "__main__":
     unittest.main()
