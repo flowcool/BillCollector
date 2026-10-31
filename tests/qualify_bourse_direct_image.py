@@ -27,7 +27,7 @@ for name, relative in {'BC_DATA_DIR':'data', 'BC_DB_DIR':'db', 'BC_DB_FILE':'db/
 from billcollector import bourse_direct, config, downloads, notice, runner
 import pypdf
 assert os.getuid() == 1003 and os.getgid() == 1000
-assert pypdf.__version__ == '6.21.2'
+assert pypdf.__version__ == '6.21.4'
 shutil.copytree('/checks/tests', root/'tests')
 shutil.copytree('/apps/recipes_playwright', root/'apps/recipes_playwright')
 hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()

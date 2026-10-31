@@ -49,7 +49,8 @@ applies. Do not use a query credential as an identity field.
 
 ## Revision rule: pdf-graph-v1
 
-The revision hashes the parsed PDF object graph with pypdf 6.21.2. It retains
+The revision hashes the parsed PDF object graph with pypdf 6.21.4. The security
+update from 6.21.2 preserves the qualified graph digests and `pdf-graph-v1`. It retains
 page content, encoded streams, fonts, images, annotations, attachments, forms,
 XMP, document metadata and local destination targets. Original bytes are never
 rewritten. The following generation differences do not create a revision:
