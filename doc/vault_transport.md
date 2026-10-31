@@ -21,9 +21,11 @@ CLI API remains local. HTTPS is refused because `bw serve` itself speaks HTTP;
 a TLS proxy in front of it is not supported by this client.
 
 This is target enforcement, not API authentication. `bw serve` must remain on a
-trusted private network. Exact item resolution and stable account identity are
-separate work. The diagnostics fix in upstream PR #11 is also needed to prevent
-existing response/error logging from retaining sensitive data.
+trusted private network. Credential retrieval searches the item list for the
+configured name, requires exactly one exact (case-sensitive) match, and fetches
+the item and its optional TOTP by that validated item id; missing, ambiguous or
+changed identities fail with a sanitized error that retains no names, queries,
+credentials or response bodies.
 
 Verification uses `python -m unittest tests.test_vault_transport -v`, with mocked
 DNS/HTTP and a synthetic loopback partial-response server.
