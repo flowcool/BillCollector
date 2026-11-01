@@ -147,6 +147,7 @@ The implementation follows six steps:
 
 | Requirement | Evidence in repository |
 |---|---|
+| Final session or a later phase after submission skips optional phases; no OTP after final proof | `test_optional_login_phases_follow_actual_session` |
 | Session proof bypasses login and resets budget | `test_real_browser_existing_session_skips_and_resets` |
 | One submit per phase, failed resume never replays | `test_real_browser_failure_pause_resume_never_resubmits` |
 | Password/TOTP success, failures and direct OTP entry | `test_two_phase_browser_login_counts_one_transaction` |

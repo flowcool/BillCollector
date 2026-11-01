@@ -856,21 +856,19 @@ def _execute_login(ctx, step):
     if proven(options["session_timeout_ms"]):
         return
     phases = options["phases"]
+    markers = [_locator_for(ctx.page, process_argument(phase["success"], ctx.bcs))
+               for phase in phases[:-1]]
     start = 0
     # Find the latest completed phase before dispatching any credentials.
     for index in range(len(phases) - 2, -1, -1):
         try:
-            _locator_for(ctx.page, process_argument(phases[index]["success"], ctx.bcs)).wait_for(
-                state="visible", timeout=options["session_timeout_ms"])
+            markers[index].wait_for(state="visible", timeout=options["session_timeout_ms"])
             start = index + 1
             break
         except PlaywrightTimeoutError:
             pass
     # After a submission, any later state may be the portal's next state.
     # Poll all markers within one deadline, with final authentication first.
-    markers = [_locator_for(ctx.page, process_argument(phase["success"], ctx.bcs))
-               for phase in phases[:-1]]
-
     def next_phase(current):
         deadline = time.monotonic() + options["timeout_ms"] / 1000
         while True:
