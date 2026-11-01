@@ -105,6 +105,22 @@ definitions:
               additionalItems: false
           not:
             required: [ steps ]
+      - if:
+          required: [ methods ]
+          properties:
+            methods:
+              contains:
+                type: object
+                properties:
+                  method:
+                    const: bourse_direct
+                required: [ method ]
+        then:
+          properties:
+            graceful:
+              const: false
+          not:
+            required: [ steps ]
   nestedStep:
     type: object
     required: [ step ]
@@ -136,7 +152,8 @@ definitions:
                 required: [ method ]
                 properties:
                   method:
-                    enum: [ "click_until_absent", "download_all", "replacement_calendar" ]
+                    enum: [ "click_until_absent", "download_all", "replacement_calendar", "bourse_direct" ]
+
   method:
     oneOf:
       - $ref: "#/definitions/playwrightMethod"

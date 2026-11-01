@@ -60,6 +60,7 @@ def catalog(tmp_path, monkeypatch):
     monkeypatch.setattr(config, 'RECIPE_DIR', tmp_path)
     source = tmp_path / 'bourse_direct_adapter.py'
     source.write_text(SOURCE)
+    source.chmod(0o644)
     return source
 
 
@@ -84,6 +85,12 @@ def test_load_save_and_run_start_do_not_execute_adapter(catalog, tmp_path, monke
     resource.assert_called_once()
     denied.assert_not_called()
     assert not marker.exists()
+
+
+def test_catalog_rejects_group_writable_source(catalog):
+    catalog.chmod(0o664)
+    with pytest.raises(ValueError):
+        boundary.candidate()
 
 
 @pytest.mark.parametrize('corrupt', ['method', 'arguments', 'literal', 'missing'])

@@ -8,6 +8,8 @@ registration, recipe-selected path or alternate credential engine is provided.
 import ast
 import copy
 import inspect
+import os
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +56,9 @@ def candidate():
     """Freeze source without executing catalog code at load/save/run start."""
     try:
         path = config.RECIPE_DIR / 'bourse_direct_adapter.py'
+        metadata = path.stat()
+        if metadata.st_uid != os.getuid() or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise ValueError
         source = path.read_bytes()
         if len(source) > 256 * 1024:
             raise ValueError
@@ -165,7 +170,7 @@ class Acquisition:
         self._chains, self._save = copy.deepcopy(spec.chains), save_download
         self._deadline = time.monotonic() + options['timeout_ms'] / 1000
         self._maximum, self._offered, self._saved, self._reads = options['max_items'], 0, 0, 0
-        self._origin = self._origin_of(ctx.page.url)
+        self._origin = self._origin_of(ctx.page.url.split('#', 1)[0])
 
     @staticmethod
     def _origin_of(url):
