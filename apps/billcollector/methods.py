@@ -151,7 +151,17 @@ def validate_method_recipe(recipe):
     """Shared UI/run-start gate; diagnostics never contain argument values."""
     from .bourse_direct_boundary import prepare
 
-    prepare(recipe)
+    try:
+        prepare(recipe)
+    except ValueError as error:
+        for service in recipe.get('services', []):
+            for step in service.get('steps', []):
+                if any(entry.get('method') == 'bourse_direct'
+                       for entry in step.get('methods', [])):
+                    raise ValueError(
+                        f"service {service.get('serviceName')}, step {step.get('step')}, "
+                        f"method bourse_direct: {error}") from None
+        raise
 
     def visit(step, service):
         owners = {Page}

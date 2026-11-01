@@ -1060,10 +1060,14 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
         try:
             dates = DateContext.capture(task["date_window_days"], date_from)
             validate_variable_recipe(recipe, dates)
+        except ValueError as e:
+            print(f"runner: invalid variable contract: {e}", file=sys.stderr)
+            return 1
+        try:
             from .bourse_direct_boundary import prepare
             adapter_candidate = prepare(recipe)
         except ValueError as e:
-            print(f"runner: invalid variable contract: {e}", file=sys.stderr)
+            print(f"runner: invalid method contract: {e}", file=sys.stderr)
             return 1
 
         # C6: the runner owns the per-run display: claim a display from the

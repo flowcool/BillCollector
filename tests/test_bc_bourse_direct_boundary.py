@@ -104,6 +104,7 @@ def test_bad_adapter_rejected_at_all_gates(catalog, tmp_path, monkeypatch, corru
         catalog.write_text(SOURCE.replace(repr(CHAINS), repr(chains)))
     ok, error, _ = validate_recipe(text)
     assert not ok and 'secret-value' not in error
+    assert 'service synthetic, step 3, method bourse_direct' in error
     assert not load_recipe(path)[0]
     assert not save_recipe(path, text + '\n# rejected')[0]
     assert path.read_text() == text
