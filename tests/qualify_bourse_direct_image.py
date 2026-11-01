@@ -31,7 +31,8 @@ assert pypdf.__version__ == '6.21.4'
 shutil.copytree('/checks/tests', root/'tests')
 shutil.copytree('/apps/recipes_playwright', root/'apps/recipes_playwright')
 hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()
-          for name in ('billcollector/bourse_direct.py', 'billcollector/throttle.py', 'billcollector/notice.py',
+          for name in ('billcollector/bourse_direct.py', 'billcollector/bourse_direct_boundary.py',
+                       'billcollector/throttle.py', 'billcollector/notice.py',
                        'billcollector/downloads.py', 'billcollector/runner.py',
                        'recipes_playwright/recipe-pw-schema.yaml')}
 print(json.dumps({'packaged_source_sha256':hashes, 'uid':os.getuid(),
@@ -41,6 +42,7 @@ os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
 sys.path.insert(0, '/test-deps')
 import pytest
 code = pytest.main([str(root/'tests/test_bourse_direct.py'),
+                    str(root/'tests/test_bc_bourse_direct_boundary.py'),
                     str(root/'tests/test_notice_identity.py'),
                     str(root/'tests/test_throttle.py'), '-q',
                     '--basetemp', str(root/'pytest-proof')])
@@ -104,7 +106,8 @@ def main():
     state = json.loads(subprocess.run(['docker', 'inspect', container], check=True,
                                      capture_output=True, text=True).stdout)[0]
     hashes = {name: hashlib.sha256((engine/'apps'/name).read_bytes()).hexdigest()
-              for name in ('billcollector/bourse_direct.py', 'billcollector/throttle.py', 'billcollector/notice.py',
+              for name in ('billcollector/bourse_direct.py', 'billcollector/bourse_direct_boundary.py',
+                           'billcollector/throttle.py', 'billcollector/notice.py',
                            'billcollector/downloads.py', 'billcollector/runner.py',
                            'recipes_playwright/recipe-pw-schema.yaml')}
     log_text = (root/'container.log').read_text()

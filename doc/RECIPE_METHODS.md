@@ -83,10 +83,12 @@ design: a locator chain such as `get_by_role` -> `first` -> `filter` ->
 `get_by_label` -> `click` is valid, and new Playwright API added by a
 version bump stays supported automatically.
 
-Six method names are **reserved**: the runner intercepts them before
+Eight method names are **reserved**: the runner intercepts them before
 Playwright dispatch and they are never passed to the browser API:
 `login`, `wait_user`, `expect_download`, `click_until_absent`,
-`download_all`, `replacement_calendar`. Their exact contracts are in section 3
+`download_all`, `replacement_calendar`, `bourse_direct`, `bourse_direct_adapter`.
+The catalog adapter contract and legacy compatibility are in
+[BOURSE_DIRECT_ADAPTER.md](BOURSE_DIRECT_ADAPTER.md). Other contracts are in section 3
 and the [replacement-calendar contract](REPLACEMENT_CALENDARS.md). C3 validates
 calendar options with the same offline validator used by calendar execution.
 
@@ -243,6 +245,17 @@ publish its exact bytes, retaining any UTF-8 BOM. Unsafe paths/special entries,
 multiple files and size/count violations fail closed. Both options are rejected
 by the legacy batch adapter. See [bounds and storage](../README.md#incremental-document-collection).
 
+### Fixed catalog adapter (fork)
+
+`bourse_direct_adapter` is a standalone top-level daemon action after one native
+`login`. Its options are exactly `account_type`, `max_months`, `max_items` and
+`timeout_ms`. It requires the notice identity policy and a reviewed fixed catalog
+file with literal C3-validated `CHAINS`. It cannot be graceful, nested, preceded
+by a locator, or combined with the legacy `bourse_direct` source action.
+See [BOURSE_DIRECT_ADAPTER.md](BOURSE_DIRECT_ADAPTER.md) for the supported
+installation, limits and the naming difference from public-baseline PR #89.
+The existing `bourse_direct` recipe and delivery contracts are unchanged.
+
 ## 4. Variables
 
 The daemon expands original string argument values recursively in dictionaries
@@ -287,8 +300,8 @@ browser access.
 Already enforced by the existing gates (keep): the schema rejects
 unknown top-level keys, missing `serviceName`/`steps`/`step`, non-
 integer step numbers, wrong argument value types, the collection
-action chain shape (exactly `[page-locator, action]`, `graceful:
-false`, no nested `steps`), the collection action argument names,
+action chain shape (exactly `[page-locator, action]`, or a standalone
+`bourse_direct_adapter`, `graceful: false`, no nested `steps`), the collection action argument names,
 types and ranges (section 3 tables), and the `phases` block shape;
 `validate_login_recipe` rejects a non-standalone, nested or
 multi-per-recipe `login`, `submit`/`phases` outside a login block, the
