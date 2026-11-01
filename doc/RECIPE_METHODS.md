@@ -87,15 +87,16 @@ Six method names are **reserved**: the runner intercepts them before
 Playwright dispatch and they are never passed to the browser API:
 `login`, `wait_user`, `expect_download`, `click_until_absent`,
 `download_all`, `replacement_calendar`. Their exact contracts are in section 3
-and the [replacement-calendar contract](REPLACEMENT_CALENDARS.md).
+and the [replacement-calendar contract](REPLACEMENT_CALENDARS.md). C3 validates
+calendar options with the same offline validator used by calendar execution.
 
-A method name that is neither reserved nor a public attribute of the
-chain object's type fails at execution with `Method '<name>' not found
-on <type>`. Validation (F08) must reject such names **before** vault
-and browser access, deriving the allowlist by introspecting the pinned
-Playwright package (not a hand-maintained list), so intentionally
-supported Playwright calls are never rejected. Re-derive when the pin
-changes.
+Validation (F08) rejects unknown attributes before vault and browser access.
+It derives the public surface, signatures and argument types from the installed
+pinned Playwright package. Re-derive the surface when the pin changes.
+Primitive and collection results can end a chain. Their Python methods cannot
+continue a recipe chain. A return annotated `Any` has no known static type;
+validation permits public Playwright continuations, while execution still checks
+the actual runtime result.
 
 Methods the shipped recipes actually use (compatibility baseline,
 section 5): `click`, `close`, `fill`, `first`, `goto`, `locator`,
@@ -276,7 +277,7 @@ separate substitution behavior.
 ## 5. Validation requirements (F08)
 
 Gate: the daemon runner already validates the recipe before display
-allocation, vault preflight and browser launch (the shared
+allocation, vault preflight and browser launch (the shared `load_recipe` /
 `validate_recipe` gate in `runner.py::_run_task`); the UI
 validates on load and on save (`apps/billcollector/recipes.py`). The
 hardening is enforced in these same gates (`validate_recipe` / the schema /
