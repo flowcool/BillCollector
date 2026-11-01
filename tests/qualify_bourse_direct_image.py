@@ -8,6 +8,7 @@ See doc/INFRA_RUNTIME_CONTRACT.md for daemon-path proof and the handoff template
 import argparse
 import hashlib
 import importlib.util
+from importlib.metadata import distribution
 import json
 import os
 import shutil
@@ -45,7 +46,8 @@ code = pytest.main([str(root/'tests/test_bc_login.py'),
                     str(root/'tests/test_bourse_direct.py'),
                     str(root/'tests/test_bc_bourse_direct_boundary.py'),
                     str(root/'tests/test_notice_identity.py'),
-                    str(root/'tests/test_throttle.py'), '-p', 'pytest_asyncio.plugin', '-q',
+                    str(root/'tests/test_throttle.py'), '-p', 'pytest_asyncio.plugin',
+                    '-o', 'asyncio_mode=auto', '-q',
                     '--basetemp', str(root/'pytest-proof')])
 if code:
     sys.exit(code)
@@ -77,6 +79,12 @@ def main():
             shutil.copytree(origin.parent, deps/name)
         else:
             shutil.copy2(origin, deps/origin.name)
+    # pytest-asyncio resolves its version through installed package metadata.
+    package = distribution('pytest-asyncio')
+    metadata = next(path.parent for path in package.files
+                    if path.name == 'METADATA' and path.parent.name.endswith('.dist-info'))
+    source = Path(package.locate_file(metadata))
+    shutil.copytree(source, deps / source.name)
     for path in deps.rglob('*'):
         path.chmod(0o755 if path.is_dir() else 0o644)
     root.chmod(0o755)
