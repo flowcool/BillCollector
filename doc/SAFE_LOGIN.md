@@ -25,6 +25,11 @@ One transaction reserves one budget entry before its first submission. Each
 phase submits once. A failed phase stops all later automatic phases. Resume
 only verifies final authentication. A visible intermediate success locator lets
 the runner skip an already completed phase. Use a marker unique to that state.
+The runner checks the final session and all later phase markers after every
+submission, within one `timeout_ms` deadline. Final proof ends login immediately.
+A later intermediate marker skips optional phases that the portal did not offer.
+For example, password submission can lead directly to the final session or OTP,
+with no device chooser. The runner never fills OTP after final session proof.
 A crash between phases consumes one transaction attempt.
 An intermediate marker must disappear after the portal leaves that state. A marker
 that stays visible on later pages can make the runner skip a required phase.

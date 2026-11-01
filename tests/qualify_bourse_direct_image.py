@@ -41,10 +41,11 @@ os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/apps/browser'
 os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
 sys.path.insert(0, '/test-deps')
 import pytest
-code = pytest.main([str(root/'tests/test_bourse_direct.py'),
+code = pytest.main([str(root/'tests/test_bc_login.py'),
+                    str(root/'tests/test_bourse_direct.py'),
                     str(root/'tests/test_bc_bourse_direct_boundary.py'),
                     str(root/'tests/test_notice_identity.py'),
-                    str(root/'tests/test_throttle.py'), '-q',
+                    str(root/'tests/test_throttle.py'), '-p', 'pytest_asyncio.plugin', '-q',
                     '--basetemp', str(root/'pytest-proof')])
 if code:
     sys.exit(code)
@@ -70,7 +71,7 @@ def main():
     deps = root/'test-deps'
     deps.mkdir(mode=0o755)
     deps.chmod(0o755)
-    for name in ('pytest', '_pytest', 'pluggy', 'iniconfig', 'packaging', 'py'):
+    for name in ('pytest', '_pytest', 'pluggy', 'iniconfig', 'packaging', 'py', 'pytest_asyncio'):
         origin = Path(importlib.util.find_spec(name).origin)
         if origin.name == '__init__.py':
             shutil.copytree(origin.parent, deps/name)
