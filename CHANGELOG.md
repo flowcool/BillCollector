@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Native phased login accepts final sessions after any submission and skips
+  optional phases when a later state is proven. Preserve one durable attempt,
+  fresh OTP resolution and verification-only resume.
+
 ### Changed
 
 - Update pypdf to 6.21.4 for seven security fixes. Align the packaged image

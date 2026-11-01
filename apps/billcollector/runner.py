@@ -39,6 +39,7 @@ import os
 import signal
 import sqlite3
 import sys
+import time
 from datetime import datetime
 
 from helpers import ServiceObj, VARIABLE_MAP
@@ -839,35 +840,54 @@ def _execute_login(ctx, step):
     options = login_options(step)
     locator = _locator_for(ctx.page, process_argument(options["success"], ctx.bcs))
 
-    def proven(timeout):
-        try:
-            locator.wait_for(state="visible", timeout=timeout)
-        except PlaywrightTimeoutError:
-            return False
+    def record_proof():
         if not ctx.db.login_succeeded(ctx.task["id"], ctx.run_id):
             raise StepAbortError("Another run owns the unresolved login attempt")
         ctx.native_login_proven = True
         return True
 
+    def proven(timeout):
+        try:
+            locator.wait_for(state="visible", timeout=timeout)
+        except PlaywrightTimeoutError:
+            return False
+        return record_proof()
+
     if proven(options["session_timeout_ms"]):
         return
     phases = options["phases"]
+    markers = [_locator_for(ctx.page, process_argument(phase["success"], ctx.bcs))
+               for phase in phases[:-1]]
     start = 0
     # Find the latest completed phase before dispatching any credentials.
     for index in range(len(phases) - 2, -1, -1):
         try:
-            _locator_for(ctx.page, process_argument(phases[index]["success"], ctx.bcs)).wait_for(
-                state="visible", timeout=options["session_timeout_ms"])
+            markers[index].wait_for(state="visible", timeout=options["session_timeout_ms"])
             start = index + 1
             break
         except PlaywrightTimeoutError:
             pass
+    # After a submission, any later state may be the portal's next state.
+    # Poll all markers within one deadline, with final authentication first.
+    def next_phase(current):
+        deadline = time.monotonic() + options["timeout_ms"] / 1000
+        while True:
+            if locator.is_visible():
+                record_proof()
+                return len(phases)
+            for completed in range(len(markers) - 1, current - 1, -1):
+                if markers[completed].is_visible():
+                    return completed + 1
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise PlaywrightTimeoutError("Login has no next-state proof")
+            ctx.page.wait_for_timeout(min(50, remaining * 1000))
+
     reserved = False
     try:
-        for index in range(start, len(phases)):
+        index = start
+        while index < len(phases):
             phase = phases[index]
-            final = index == len(phases) - 1
-            marker = _locator_for(ctx.page, process_argument(phase["success"], ctx.bcs))
             for preparation in phase.get("steps", []):
                 _execute_step(ctx, preparation, parent_step=step["step"], single_attempt=True)
             if not reserved:
@@ -880,11 +900,8 @@ def _execute_login(ctx, step):
                     raise StepAbortError("Login attempt refused; check the task login block")
                 reserved = True
             _execute_step(ctx, phase["submit"], parent_step=step["step"], single_attempt=True)
-            if final:
-                if proven(options["timeout_ms"]):
-                    return
-            else:
-                marker.wait_for(state="visible", timeout=options["timeout_ms"])
+            index = next_phase(index)
+        return  # next_phase proved the final authenticated session.
     except RunInterrupted:
         raise
     except Exception as e:

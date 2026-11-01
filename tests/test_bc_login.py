@@ -26,7 +26,7 @@ from billcollector.db import Database, SCHEMA
 from billcollector.interrupt import RunInterrupted
 from billcollector.login import login_options, settle_attempt, validate_login_recipe
 from billcollector.orchestrator import Orchestrator
-from billcollector.recipes import validate_recipe
+from billcollector.recipes import load_recipe, save_recipe, validate_recipe
 
 
 @pytest.fixture(autouse=True)
@@ -889,3 +889,67 @@ def test_finalized_attempt_recovery_ignores_reused_pid(db):
     assert Orchestrator(db).cleanup_orphans() == 0
     assert db.get_task(task)["login_pending_run_id"] is None
     assert db.get_task(task)["status"] == "idle"
+
+
+@pytest.mark.parametrize("path", ["final", "otp", "chooser", "existing"])
+@pytest.mark.parametrize("delay_ms", [0, 150])
+def test_optional_login_phases_follow_actual_session(input_login, tmp_path, path, delay_ms):
+    """A password response may finish login or skip the configured chooser."""
+    ctx, submissions, otp = input_login
+    step = input_triggered_phased_login_step()
+    chooser = {"steps": [], "success": {"selector": "#otp"},
+               "submit": {"step": 24, "methods": [
+                   {"method": "locator", "arguments": [{"selector": "#choose"}]},
+                   {"method": "click"}]}}
+    step["phases"][0]["success"] = {"selector": "#choose"}
+    step["phases"].insert(1, chooser)
+    ctx.page.evaluate("""({path, delay}) => {
+        window.choices = 0;
+        const button = document.createElement('button');
+        button.id = 'choose'; button.textContent = 'Choose'; button.hidden = true;
+        button.onclick = () => {
+            choices++; button.hidden = true;
+            document.querySelector('#otp').hidden = false;
+        };
+        document.body.append(button);
+        const old = document.querySelector('#password');
+        const password = old.cloneNode(true); old.replaceWith(password);
+        password.addEventListener('input', async () => {
+            counts[0]++;
+            await submitted('password');
+            setTimeout(() => {
+                password.hidden = true;
+                document.querySelector(path === 'final' ? '#account' :
+                    path === 'chooser' ? '#choose' : '#otp').hidden = false;
+            }, delay);
+        });
+        if (path === 'existing') document.querySelector('#account').hidden = false;
+    }""", {"path": path, "delay": delay_ms})
+    recipe = {"services": [{"serviceName": "mock", "steps": [step]}]}
+    candidate = tmp_path / "recipe-pw__optional.yaml"
+    assert save_recipe(candidate, yaml.safe_dump(recipe))[0]
+    loaded, _, _, recipe = load_recipe(candidate)
+    assert loaded
+    ctx.context = ctx.page.context
+    ctx.bcs.usr = "synthetic"
+    ctx.files_downloaded = []
+    with mock.patch.object(runner, "sync_playwright", return_value=nullcontext(None)), \
+            mock.patch.object(runner, "_launch_browser"), \
+            mock.patch.object(ctx.page, "close"), \
+            mock.patch.object(ctx.context, "close"), \
+            mock.patch.object(runner, "pause_loop", return_value="cancel") as pause:
+        _, aborted, outcome = runner._run_recipe(ctx, recipe)
+    assert not aborted and outcome is None
+    pause.assert_not_called()
+    expected_otp = int(path in {"otp", "chooser"})
+    assert ctx.page.evaluate("counts") == [int(path != "existing"), expected_otp]
+    assert ctx.page.evaluate("choices") == int(path == "chooser")
+    assert otp.call_count == expected_otp
+    assert submissions == [(phase, 1, ctx.run_id) for phase in
+                           ([] if path == "existing" else ["password"] +
+                            (["otp"] if expected_otp else []))]
+    assert ctx.native_login_proven
+    assert ctx.page.locator("#account").is_visible()
+    task = ctx.db.get_task(ctx.task["id"])
+    assert task["login_failures"] == 0
+    assert task["login_pending_run_id"] is None
