@@ -293,3 +293,63 @@ def test_schema_diagnostics_include_only_expected_schema_values(
     assert not ok
     assert str(expected) in error
     assert 'synthetic-secret' not in error
+
+
+@pytest.fixture
+def calendar_recipe():
+    return document([
+        {'method': 'locator', 'arguments': [{'selector': '#calendar'}]},
+        {'method': 'replacement_calendar', 'arguments': [{
+            'account_id': 'synthetic-account', 'account_selector': '.account',
+            'year_selector': '.year', 'month_selector': '.month',
+            'previous_selector': '.previous', 'item_selector': '.notice',
+            'empty_selector': '.empty', 'ready_selector': '.ready', 'max_months': 3,
+            'download_options': {'key_attribute': 'href', 'max_items': 8,
+                                 'timeout_ms': 5000, 'event_window_ms': 100},
+        }]},
+    ])
+
+
+def test_public_calendar_action_remains_valid_with_c3(calendar_recipe):
+    ok, error, _ = validate_recipe(yaml.safe_dump(calendar_recipe))
+    assert ok, error
+
+
+@pytest.mark.parametrize('mutation', ['month_names', 'selector', 'event_window'])
+def test_calendar_semantics_fail_with_secret_safe_coordinates(calendar_recipe, mutation):
+    options = calendar_recipe['services'][0]['steps'][0]['methods'][1]['arguments'][0]
+    if mutation == 'month_names':
+        options['month_names'] = ['synthetic-secret'] * 12
+    elif mutation == 'selector':
+        options['ready_selector'] = ' '
+    else:
+        options['download_options']['event_window_ms'] = 5000
+    ok, error, data = validate_recipe(yaml.safe_dump(calendar_recipe))
+    assert not ok
+    assert data is None
+    assert 'synthetic' in error and '17' in error and 'replacement_calendar' in error
+    assert 'synthetic-secret' not in error
+
+
+def test_public_notice_identity_preserves_c3_method_validation():
+    recipe = document([
+        {'method': 'locator', 'arguments': [{'selector': 'a.notice'}]},
+        {'method': 'download_all', 'arguments': [{
+            'key_attribute': 'href', 'max_items': 2, 'timeout_ms': 5000,
+            'event_window_ms': 20}]},
+    ], notice_identity={'query_parameters': ['account', 'notice']})
+    ok, error, _ = validate_recipe(yaml.safe_dump(recipe))
+    assert ok, error
+    recipe['services'][0]['steps'][0]['methods'][0]['method'] = 'unknown_method'
+    ok, error, _ = validate_recipe(yaml.safe_dump(recipe))
+    assert not ok
+    assert 'unknown_method' in error
+    assert 'synthetic' in error and '17' in error
+
+
+def test_public_notice_semantic_validation_is_kept_with_c3():
+    recipe = document([{'method': 'goto', 'arguments': [{'url': 'https://synthetic.invalid'}]}],
+                      notice_identity={'query_parameters': ['account']})
+    ok, error, _ = validate_recipe(yaml.safe_dump(recipe))
+    assert not ok
+    assert 'notice identity contract' in error
