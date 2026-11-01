@@ -285,7 +285,7 @@ def perform_actions(bcs):
                             if isinstance(entry, dict)
                         }
                         if nested and methods & {
-                            "click_until_absent", "download_all", "replacement_calendar"
+                            "click_until_absent", "download_all", "replacement_calendar", "bourse_direct_adapter"
                         }:
                             raise StepAbortError(
                                 "bounded collection actions cannot be nested "
@@ -459,7 +459,7 @@ def process_step(bcs, step, collection_actions=None):
 
     if graceful and any(
         isinstance(entry, dict)
-        and entry.get("method") in {"click_until_absent", "download_all", "replacement_calendar"}
+        and entry.get("method") in {"click_until_absent", "download_all", "replacement_calendar", "bourse_direct_adapter"}
         for entry in methods
     ):
         message = "bounded collection actions cannot be graceful"

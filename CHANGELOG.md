@@ -32,6 +32,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Explicit `bourse_direct_adapter` catalog boundary with native login, fixed run
+  dates, C3 load/save/run-start validation, frozen trusted source and bounded
+  authenticated original reads. Existing `bourse_direct` catalogs keep their
+  current contract. Provider qualification and deployment remain separate.
+
 - One Infra runtime contract for consume-folder delivery, exact vault lookup,
   schema promotion, DB/configuration handoffs and daemon-path qualification.
   Provider docs and harness boundaries now refer to it. No runtime, recipe-schema
