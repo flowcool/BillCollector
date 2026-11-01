@@ -51,7 +51,7 @@ copied from another version. For example, `get_by_label` and
 `get_by_placeholder` take a `text` argument. `press` takes `key`, not `value`.
 A Page-level `click` requires `selector`; a locator's `click` does not.
 The [C3 reference](RECIPE_METHODS.md#2-dispatch-model-the-playwright-surface)
-describes the general surface and the five reserved names.
+describes the general surface and the reserved engine actions.
 
 `arguments` is a list of option objects merged into keyword arguments. Prefer
 one key per object for ordinary Playwright methods. A collection action uses

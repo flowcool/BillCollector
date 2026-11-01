@@ -83,10 +83,12 @@ design: a locator chain such as `get_by_role` -> `first` -> `filter` ->
 `get_by_label` -> `click` is valid, and new Playwright API added by a
 version bump stays supported automatically.
 
-Six method names are **reserved**: the runner intercepts them before
+Eight method names are **reserved**: the runner intercepts them before
 Playwright dispatch and they are never passed to the browser API:
 `login`, `wait_user`, `expect_download`, `click_until_absent`,
-`download_all`, `replacement_calendar`. Their exact contracts are in section 3
+`download_all`, `replacement_calendar`, `bourse_direct`, `bourse_direct_adapter`.
+The catalog adapter contract and legacy compatibility are in
+[BOURSE_DIRECT_ADAPTER.md](BOURSE_DIRECT_ADAPTER.md). Other contracts are in section 3
 and the [replacement-calendar contract](REPLACEMENT_CALENDARS.md). C3 validates
 calendar options with the same offline validator used by calendar execution.
 

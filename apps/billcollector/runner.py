@@ -1108,7 +1108,7 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None, collection_m
 
         try:
             from .bourse_direct_boundary import prepare
-            adapter_candidate = prepare(recipe)
+            adapter_candidate = prepare(recipe, dates=dates)
         except ValueError as e:
             print(f"runner: invalid method contract: {e}", file=sys.stderr)
             return 1

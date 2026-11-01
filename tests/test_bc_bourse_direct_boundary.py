@@ -76,6 +76,8 @@ def test_load_save_and_run_start_do_not_execute_adapter(catalog, tmp_path, monke
     db = Database()
     task = db.create_task('synthetic', 'test', recipe_file=str(path))
     db.close()
+    monkeypatch.setattr(runner.DateContext, 'capture', Mock(return_value=DateContext(
+        date(2026, 1, 15), date(2025, 11, 15))))
     resource = Mock(side_effect=runner.display.DisplayError('synthetic stop'))
     monkeypatch.setattr(runner.display, 'allocate_display', resource)
     denied = Mock(side_effect=AssertionError('must not reach vault/browser'))
@@ -397,3 +399,50 @@ def test_catalog_dispatch_requires_native_final_session(browser_ctx):
         runner._execute_step(ctx, recipe()['services'][0]['steps'][-1])
     assert ctx.files_downloaded == []
     assert not any(path.startswith('/original') for path, _ in state['requests'])
+
+
+@pytest.mark.parametrize('uid,accepted', [(0, True), (987654, False)])
+def test_catalog_owner_must_be_root_or_runtime(catalog, monkeypatch, uid, accepted):
+    import os
+
+    original = Path.stat
+
+    def metadata(path, **kwargs):
+        value = original(path, **kwargs)
+        if path == catalog:
+            fields = list(value)
+            fields[4] = uid
+            return os.stat_result(fields)
+        return value
+
+    monkeypatch.setattr(Path, 'stat', metadata)
+    if accepted:
+        assert boundary.candidate().source == catalog.read_bytes()
+    else:
+        with pytest.raises(ValueError, match='root/runtime-owned'):
+            boundary.candidate()
+
+
+@pytest.mark.parametrize('start', [None, '2025-01-01'])
+def test_month_budget_rejected_before_any_resources(catalog, tmp_path, monkeypatch, start):
+    path = tmp_path / 'recipe.yaml'
+    assert save_recipe(path, yaml.safe_dump(recipe()))[0]
+    monkeypatch.setattr(config, 'DB_FILE', tmp_path / 'isolated.db')
+    db = Database()
+    task_id = db.create_task('synthetic', 'test', recipe_file=str(path))
+    db.close()
+    dates = DateContext(date(2026, 1, 15), date(2025, 9, 15))
+    capture = Mock(return_value=dates)
+    monkeypatch.setattr(runner.DateContext, 'capture', capture)
+    denied = Mock(side_effect=AssertionError('must not acquire resources'))
+    monkeypatch.setattr(runner.display, 'allocate_display', denied)
+    monkeypatch.setattr(runner, '_vault_preflight', denied)
+    monkeypatch.setattr(runner, 'sync_playwright', denied)
+    assert runner.run_task(task_id, date_from=start) == 1
+    capture.assert_called_once_with(90, start)
+    denied.assert_not_called()
+    db = Database()
+    try:
+        assert not db.list_runs()
+    finally:
+        db.close()

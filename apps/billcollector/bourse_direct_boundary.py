@@ -57,8 +57,8 @@ def candidate():
     try:
         path = config.RECIPE_DIR / 'bourse_direct_adapter.py'
         metadata = path.stat()
-        if metadata.st_uid != os.getuid() or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-            raise ValueError('adapter catalog must be runtime-owned and not group/world-writable')
+        if metadata.st_uid not in (0, os.getuid()) or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise ValueError('adapter catalog must be root/runtime-owned and not group/world-writable')
         source = path.read_bytes()
         if len(source) > 256 * 1024:
             raise ValueError
@@ -103,7 +103,7 @@ def validate_options(options):
             raise ValueError('adapter bound is invalid')
 
 
-def prepare(recipe):
+def prepare(recipe, *, dates=None):
     """One standalone collection after native final-session proof, one service."""
     found = []
 
@@ -144,6 +144,13 @@ def prepare(recipe):
     before = ordered[:ordered.index(found[0])]
     if sum(is_login(step) for step in ordered) != 1 or not any(is_login(step) for step in before):
         raise ValueError('adapter requires a preceding native login with final-session proof')
+    if dates is not None:
+        from .calendar import _months
+
+        try:
+            tuple(_months(dates, found[0]['methods'][0]['arguments'][0]['max_months']))
+        except CollectionError as error:
+            raise ValueError(str(error)) from None
     return candidate()
 
 

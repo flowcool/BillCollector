@@ -28,7 +28,7 @@ module, path, entry point or another provider. There is no plugin discovery or
 registration API. This is trusted application code. Review it with its recipe;
 the capabilities below are an integration interface, not a Python sandbox.
 Do not install untrusted Python through the recipe editor.
-The file must be owned by the runtime user and must not be group- or
+The file must be owned by root or the runtime user and must not be group- or
 world-writable. A normal `0644` file passes this check. The image build removes
 group/world write bits from the installed adapter file.
 
@@ -62,7 +62,9 @@ Load, save and run start parse the literal declaration without importing or
 executing the module. Every chain passes the installed Playwright C3 signature
 and argument gate. Reserved engine actions are prohibited inside adapter chains.
 The engine also validates its authenticated-request chain. Run start freezes the
-source and manifest before display, vault or browser access. A concurrent catalog
+source and manifest before display, vault or browser access. It also rejects
+a month budget that cannot cover the fixed run-start date window before any
+resources or native login. A concurrent catalog
 change cannot replace the code of an admitted run.
 
 ## Recipe
