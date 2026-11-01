@@ -13,6 +13,9 @@ module, path, entry point or another provider. There is no plugin discovery or
 registration API. This is trusted application code. Review it with its recipe;
 the capabilities below are an integration interface, not a Python sandbox.
 Do not install untrusted Python through the recipe editor.
+The file must be owned by the runtime user and must not be group- or
+world-writable. A normal `0644` file passes this check. The image build removes
+group/world write bits from the installed adapter file.
 
 The file declares a literal `CHAINS` dictionary and `collect(api, options)`:
 

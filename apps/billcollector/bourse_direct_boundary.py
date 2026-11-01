@@ -58,7 +58,7 @@ def candidate():
         path = config.RECIPE_DIR / 'bourse_direct_adapter.py'
         metadata = path.stat()
         if metadata.st_uid != os.getuid() or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-            raise ValueError
+            raise ValueError('adapter catalog must be runtime-owned and not group/world-writable')
         source = path.read_bytes()
         if len(source) > 256 * 1024:
             raise ValueError
@@ -77,7 +77,11 @@ def candidate():
                 or functions[0].args.kwonlyargs or functions[0].args.vararg
                 or functions[0].args.kwarg):
             raise ValueError
-    except (OSError, SyntaxError, ValueError, TypeError, RecursionError):
+    except ValueError as error:
+        if str(error).startswith('adapter catalog must be'):
+            raise
+        raise ValueError('fixed catalog adapter source or literal CHAINS is invalid') from None
+    except (OSError, SyntaxError, TypeError, RecursionError):
         raise ValueError('fixed catalog adapter source or literal CHAINS is invalid') from None
     _validate_chains(chains)
     # These are also installed Playwright calls. Check them before resources.

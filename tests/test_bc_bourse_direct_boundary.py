@@ -89,7 +89,7 @@ def test_load_save_and_run_start_do_not_execute_adapter(catalog, tmp_path, monke
 
 def test_catalog_rejects_group_writable_source(catalog):
     catalog.chmod(0o664)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='runtime-owned'):
         boundary.candidate()
 
 
