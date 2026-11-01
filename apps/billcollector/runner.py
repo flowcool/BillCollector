@@ -77,7 +77,7 @@ MAX_STEP_ATTEMPTS = 3
 # step instead of inheriting the generic three-attempt replay loop. An
 # operator-driven resume starts a new, explicit invocation after inspection.
 _COLLECTION_METHODS = frozenset({
-    "click_until_absent", "download_all", "replacement_calendar",
+    "click_until_absent", "download_all", "replacement_calendar", "bourse_direct",
 })
 
 
@@ -352,7 +352,7 @@ def transform_step_to_json(step):
         if method_name in [
             "click", "fill", "expect_download", "goto", "close",
             "content_frame", "first", "click_until_absent", "download_all",
-            "replacement_calendar",
+            "replacement_calendar", "bourse_direct",
         ]:
             transformed_step["actions"] = transformed_step.get("actions", [])
             transformed_step["actions"].append({
@@ -444,7 +444,7 @@ def _process_step(bcs, step, collection_actions=None):
                     methods, method_index, method_name
                 )
                 processed_args = [process_argument(arg, bcs) for arg in arguments]
-                if previous_result is bcs.page:
+                if previous_result is bcs.page and method_name != 'bourse_direct':
                     raise ValueError(
                         f"{method_name} requires a locator prefix"
                     )
@@ -562,10 +562,18 @@ def _collection_actions(ctx, step=None):
             completed_by_month=calendar_progress.setdefault(id(step), {}),
         )
 
+    def bourse_direct(_root, options):
+        from .bourse_direct_boundary import collect
+
+        if not getattr(ctx, 'native_login_proven', False):
+            raise collection.CollectionError('adapter requires native final-session proof')
+        return collect(ctx, getattr(ctx, 'bourse_direct_candidate', None), options, save_download)
+
     return {
         "click_until_absent": paginate,
         "download_all": download,
         "replacement_calendar": replacement_calendar,
+        "bourse_direct": bourse_direct,
     }
 
 
@@ -807,6 +815,7 @@ def _execute_login(ctx, step):
             return False
         if not ctx.db.login_succeeded(ctx.task["id"], ctx.run_id):
             raise StepAbortError("Another run owns the unresolved login attempt")
+        ctx.native_login_proven = True
         return True
 
     if proven(options["session_timeout_ms"]):
@@ -1051,6 +1060,8 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
         try:
             dates = DateContext.capture(task["date_window_days"], date_from)
             validate_variable_recipe(recipe, dates)
+            from .bourse_direct_boundary import prepare
+            adapter_candidate = prepare(recipe)
         except ValueError as e:
             print(f"runner: invalid variable contract: {e}", file=sys.stderr)
             return 1
@@ -1094,6 +1105,7 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None) -> int:
                 credentials = _vault_preflight(task, db)
                 ctx = _RunContext(task, run_id, db, debug, credentials, api_url)
                 ctx.bcs.date_context = dates
+                ctx.bourse_direct_candidate = adapter_candidate
                 files, aborted, pause_outcome = _run_recipe(ctx, recipe)
                 result = run_result(aborted, files, pause_outcome)
             except RunInterrupted:

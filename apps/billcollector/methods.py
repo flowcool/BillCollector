@@ -16,7 +16,8 @@ from playwright.sync_api import Page
 from .collection import CollectionError
 
 _RESERVED = frozenset({'login', 'wait_user', 'expect_download',
-                       'click_until_absent', 'download_all', 'replacement_calendar'})
+                       'click_until_absent', 'download_all', 'replacement_calendar',
+                       'bourse_direct'})
 _UNTIL = (('role', 'get_by_role'), ('test_id', 'get_by_test_id'),
           ('placeholder', 'get_by_placeholder'), ('label', 'get_by_label'),
           ('text', 'get_by_text'), ('selector', 'locator'))
@@ -148,6 +149,10 @@ def locator_arguments(until):
 
 def validate_method_recipe(recipe):
     """Shared UI/run-start gate; diagnostics never contain argument values."""
+    from .bourse_direct_boundary import prepare
+
+    prepare(recipe)
+
     def visit(step, service):
         owners = {Page}
         for entry in step.get('methods', []):
