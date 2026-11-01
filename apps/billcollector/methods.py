@@ -154,12 +154,31 @@ def validate_method_recipe(recipe):
     try:
         prepare(recipe)
     except ValueError as error:
+        def locate(service, step):
+            if any(entry.get('method') == 'bourse_direct'
+                   for entry in step.get('methods', [])):
+                return service, step
+            for child in step.get('steps', []):
+                found = locate(service, child)
+                if found:
+                    return found
+            if step.get('submit'):
+                found = locate(service, step['submit'])
+                if found:
+                    return found
+            for phase in step.get('phases', []):
+                found = locate(service, phase)
+                if found:
+                    return found
+            return None
+
         for service in recipe.get('services', []):
             for step in service.get('steps', []):
-                if any(entry.get('method') == 'bourse_direct'
-                       for entry in step.get('methods', [])):
+                found = locate(service, step)
+                if found:
+                    owner, action = found
                     raise ValueError(
-                        f"service {service.get('serviceName')}, step {step.get('step')}, "
+                        f"service {owner.get('serviceName')}, step {action.get('step')}, "
                         f"method bourse_direct: {error}") from None
         raise
 
