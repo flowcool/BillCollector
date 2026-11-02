@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Refresh runtime and test dependency pins, including Playwright 1.64.1.
+  Keep pyee 13.0.1 within Playwright's required >=13,<15 range so the
+  dependency batch installs successfully.
+
 - Update pypdf to 6.21.4 for seven security fixes. Align the packaged image
   qualifier and parser documentation; preserve the `pdf-graph-v1` revision rule.
 
