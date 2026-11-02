@@ -134,7 +134,7 @@ incremental actions use the same task, recipe and history.
 ## Isolated engine proof
 
 Install `apps/requirements.txt` and pytest in an isolated environment. From the
-checkout root, use the browser cache that matches Playwright 1.64.0:
+checkout root, use the browser cache that matches Playwright 1.64.1:
 
 ```sh
 PLAYWRIGHT_BROWSERS_PATH=/path/to/browser-cache \
