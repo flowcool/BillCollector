@@ -96,7 +96,7 @@ Every release and Infra handoff states the SHA-256 of
 `apps/recipes_playwright/recipe-pw-schema.yaml`. This candidate's schema is:
 
 ```text
-023dd141a90db23d1d6d9f182d40fe9347f7901ef0fb582f9cfa8de6a6c50e75
+d36f7a584e6b153ab54c7971e650491a94574ac6926a79aa5919f6695338bff3
 ```
 
 Calculate it from the exact candidate with
@@ -113,14 +113,16 @@ The current migrations add missing columns after `PRAGMA table_info` checks:
 
 | Table | Existing additive migrations |
 | --- | --- |
+| `Run` | `collection_outcome`, `date_from` |
 | `Task` | `profile_reset_at`, `date_window_days`, `login_failures`, `login_failure_limit`, `login_locked`, `login_cycle_active`, `login_pending_run_id` |
-| `Download` | `state`, `staged_path`, `source_key`, `source_identity`, `revision_sha256`, `delivery_policy`; index `download_notice_revision` |
+| `Download` | `state`, `staged_path`, `source_key`, `source_identity`, `revision_sha256`, `delivery_policy`, `delivery_attempts`; index `download_notice_revision` |
 
 Adding `login_cycle_active` also initializes it conservatively for prior login
 attempt/lock state or a limit of one. Historical download state defaults to
 `consumed`; adding columns does not prove archive delivery or populate source keys.
-This upstream synchronization adds no DB migration. The schema descriptions
-now state that notice identity is daemon-only; the option set is unchanged.
+This synchronization adds nullable `Run.collection_outcome`, `Run.date_from` and
+`Download.delivery_attempts`. Existing rows are not backfilled. Recipe validation
+also gains `download_all.allow_empty` and the upstream ZIP transport contract.
 Compare `db.py` with the previously deployed revision for each later release; list additions, backfills, defaults and
 compatibility limits in its handoff. Reuse the same DB and Task ids for dedup.
 Do not seed history from filenames, Paperless or another collector implicitly.
@@ -165,7 +167,13 @@ not overwrite exported variables. State the effective values and mounts in the
 handoff, with placeholders for private hosts, topics and account references.
 Terminal ntfy sends are best-effort and contain fixed account-free messages.
 They cover failure, interruption (including Stop/shutdown) and attention timeout.
-Success and pause cancellation stay silent. Existing pause/login-lock notifications
+Successful runs also notify with their collection outcome and window start.
+Pause cancellation stays silent. Generic delivery failures notify only on the
+first transition to `failed`; retries use the same task/checksum key.
+These delivery notices include the configured service/user and filename.
+Terminal run notices remain account-free.
+Strict Bourse Direct uncertainty remains outside generic retry: reconcile it
+through its existing acknowledgement procedure. Existing pause/login-lock notifications
 have separate payloads. No notification result proves archive delivery.
 
 ## Qualification and declared bypasses

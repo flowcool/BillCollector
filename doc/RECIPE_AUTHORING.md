@@ -102,6 +102,24 @@ does not grant automatic retries or count manual submissions in the login budget
 | Download one known document | `expect_download` with nested steps that trigger the click. Files pass through download tracking and per-task SHA-256 deduplication. |
 | Handle an empty list | Prove the portal's explicit empty state in a synthetic fixture. An empty collection still fails. A completed incremental collection that skips known committed keys succeeds without downloads. |
 
+For a ZIP transport, add `unpack: pdf` to the `download_all` options object.
+The archive must contain exactly one member, including directory entries. The
+member must be a regular file with a `.pdf` extension and a `%PDF-` signature.
+This checks the transport type; it does not parse or repair the PDF document.
+Absolute paths, empty/dot/parent components, backslashes, colons and control
+characters are rejected. Safe subdirectories are allowed; only the member's
+basename becomes the published filename. Symlinks and other special types,
+encryption, unsupported compression, corrupt archives and CRC failures fail
+before persistence. Only stored and deflated ZIP members are supported.
+The ZIP transport is limited to 32 MiB and the uncompressed member to 64 MiB.
+ZIP metadata reads are limited to 256 KiB before the member table is parsed.
+The PDF stream is bounded too. The extracted bytes pass unchanged to the normal
+save path, hash deduplication and optional notice identity. A rejected archive
+saves no record and does not mark its collection key complete. Earlier saved
+items remain saved. Without this option, downloads keep their current behavior.
+The `unpack` option applies only to `download_all`. It is not supported in
+`replacement_calendar.download_options`.
+
 Collection actions cannot be graceful, nested under `expect_download`, or placed
 in login phases. They use bounded, single-attempt execution. Later failure does
 not undo prior saved records. Resume intentionally after checking partial effects.
@@ -113,6 +131,29 @@ The fork publishes distinct documents at unique paths in the configured
 download directory. A duplicate reuses its existing path. Crash recovery can
 replay pending consumer delivery with an at-least-once contract. A download
 result does not prove archive receipt. Test with isolated files.
+
+### Opt-in incremental downloads
+
+The daemon supports `incremental: true` in `download_all` options (issue #50).
+The default and `incremental: false` keep full acquisition. The legacy batch
+runner rejects `incremental: true` before any click; it has no persistent keys.
+
+Opt in only when each `key_attribute` value is stable, unique, and identifies
+a notice that the portal never corrects in place. A constant button key or a
+changing signed URL is not suitable. Keys do not detect content revisions.
+Portals that can correct notices, including Bourse Direct, must fetch originals
+and use `notice_identity` instead.
+
+The daemon stores `<key_attribute>=<key>` in the nullable `Download.source_key`
+column. Keys are scoped to the task and attribute. Old rows remain NULL; no
+backfill occurs. Changing the task or attribute starts a separate key scope.
+The download journal retains keys across recovery. Known keys are skipped
+without clicking or comparing content. An all-known non-empty list completes
+with `Run.result=success` and the explicit log `all items known`. Empty or
+invalid lists still fail. No new control-protocol or result field is added.
+
+The schema change is additive. Reverting this feature leaves the nullable
+column and existing rows intact; older code can ignore them.
 
 ## Test without a real account
 
@@ -153,3 +194,7 @@ apps/.venv/bin/python tests/run_regression.py --ini tests/bc_regression.ini
 
 Expected: `VERDICT: PASS`, seven service/account pairs and eight test downloads
 cleaned up. This is not proof of daemon onboarding or a provider's live portal.
+
+The fork also accepts an original PDF with a UTF-8 BOM in ZIP transport.
+The BOM is retained in the published bytes and checksum. Member basename
+length is checked in filesystem bytes before publication.

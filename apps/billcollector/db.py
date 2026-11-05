@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS Run (
     pause_prompt TEXT,
     pause_context TEXT,
     pause_deadline_at TEXT,
-    notes TEXT
+    notes TEXT,
+    collection_outcome TEXT,
+    date_from TEXT
 );
 CREATE TABLE IF NOT EXISTS PageStatus (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +86,9 @@ CREATE TABLE IF NOT EXISTS Download (
     duplicate_of_id INTEGER,
     state TEXT NOT NULL DEFAULT 'consumed',
     staged_path TEXT,
+    source_identity TEXT,
+    revision_sha256 TEXT,
+    delivery_attempts INTEGER,
     source_key TEXT
 );
 CREATE TABLE IF NOT EXISTS Settings (
@@ -147,14 +152,25 @@ class Database:
         for name, definition in {
             "state": "TEXT NOT NULL DEFAULT 'consumed'",
             "staged_path": "TEXT",
+            "source_identity": "TEXT",
+            "revision_sha256": "TEXT",
+            "delivery_attempts": "INTEGER",
             "source_key": "TEXT",
         }.items():
             if name not in download_cols:
                 self.conn.execute(f"ALTER TABLE Download ADD COLUMN {name} {definition}")
 
-        for name in ("source_identity", "revision_sha256", "delivery_policy"):
+        for name in ("delivery_policy",):
             if name not in download_cols:
                 self.conn.execute(f"ALTER TABLE Download ADD COLUMN {name} TEXT")
+        run_cols = {r["name"] for r in
+                    self.conn.execute("PRAGMA table_info(Run)")}
+        for name, definition in {
+            "collection_outcome": "TEXT",
+            "date_from": "TEXT",
+        }.items():
+            if name not in run_cols:
+                self.conn.execute(f"ALTER TABLE Run ADD COLUMN {name} {definition}")
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS download_notice_revision "
             "ON Download(task_id, source_identity, revision_sha256)")
@@ -433,9 +449,21 @@ class Database:
         self.conn.commit()
         return cur.lastrowid
 
+    def get_download(self, download_id):
+        """The Download row with the given id, or None."""
+        return self.conn.execute(
+            "SELECT * FROM Download WHERE id=?", (download_id,)).fetchone()
+
     def set_download_state(self, download_id, state):
         self.conn.execute("UPDATE Download SET state=? WHERE id=?",
                           (state, download_id))
+        self.conn.commit()
+
+    def increment_download_attempts(self, download_id):
+        self.conn.execute(
+            "UPDATE Download SET delivery_attempts=COALESCE(delivery_attempts, 0) + 1 "
+            "WHERE id=?",
+            (download_id,))
         self.conn.commit()
 
     def pending_downloads(self):
@@ -455,10 +483,10 @@ class Database:
             (task_id, source_identity, revision_sha256)).fetchone()
 
     def known_source_keys(self, task_id):
-        """Source keys already committed for this task (incremental collection)."""
+        """Source keys already committed for this task; old rows stay unknown."""
         return {r["source_key"] for r in self.conn.execute(
-            "SELECT DISTINCT source_key FROM Download WHERE task_id=? AND source_key IS NOT NULL",
-            (task_id,))}
+            "SELECT DISTINCT source_key FROM Download "
+            "WHERE task_id=? AND source_key IS NOT NULL", (task_id,))}
 
     def list_downloads(self, run_id=None, task_id=None):
         if run_id is not None:

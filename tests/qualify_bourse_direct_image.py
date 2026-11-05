@@ -32,21 +32,35 @@ assert pypdf.__version__ == '6.21.4'
 shutil.copytree('/checks/tests', root/'tests')
 shutil.copytree('/apps/recipes_playwright', root/'apps/recipes_playwright')
 hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()
-          for name in ('billcollector/bourse_direct.py', 'billcollector/bourse_direct_boundary.py',
+          for name in ('billcollector/archives.py', 'billcollector/collection.py',
+                       'billcollector/db.py', 'billcollector/downloads.py',
+                       'billcollector/runner.py', 'billcollector/notify.py',
+                       'billcollector/orchestrator.py', 'billcollector/bourse_direct.py', 'billcollector/bourse_direct_boundary.py',
                        'billcollector/throttle.py', 'billcollector/notice.py',
-                       'billcollector/downloads.py', 'billcollector/runner.py',
                        'recipes_playwright/recipe-pw-schema.yaml')}
 print(json.dumps({'packaged_source_sha256':hashes, 'uid':os.getuid(),
                   'gid':os.getgid(), 'pypdf':pypdf.__version__}), flush=True)
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/apps/browser'
 os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
+os.environ['BILLCOLLECTOR_BROWSER_TESTS'] = '1'
 sys.path.insert(0, '/test-deps')
 import pytest
 code = pytest.main([str(root/'tests/test_bc_login.py'),
                     str(root/'tests/test_bourse_direct.py'),
                     str(root/'tests/test_bc_bourse_direct_boundary.py'),
                     str(root/'tests/test_notice_identity.py'),
-                    str(root/'tests/test_throttle.py'), '-p', 'pytest_asyncio.plugin',
+                    str(root/'tests/test_throttle.py'),
+                    str(root/'tests/test_bc_archives.py'),
+                    str(root/'tests/test_bc_incremental.py'),
+                    str(root/'tests/test_bc_unpack_compat.py'),
+                    str(root/'tests/test_bc_fork_sync.py'),
+                    str(root/'tests/test_bc_collection.py'),
+                    str(root/'tests/test_bc_db.py'),
+                    str(root/'tests/test_bc_downloads.py'),
+                    str(root/'tests/test_bc_downloads_recovery.py'),
+                    str(root/'tests/test_bc_runner.py'),
+                    str(root/'tests/test_bc_notify.py'),
+                    str(root/'tests/test_bc_orchestrator.py'), '-p', 'pytest_asyncio.plugin',
                     '-o', 'asyncio_mode=auto', '-q',
                     '--basetemp', str(root/'pytest-proof')])
 if code:
@@ -115,10 +129,12 @@ def main():
     state = json.loads(subprocess.run(['docker', 'inspect', container], check=True,
                                      capture_output=True, text=True).stdout)[0]
     hashes = {name: hashlib.sha256((engine/'apps'/name).read_bytes()).hexdigest()
-              for name in ('billcollector/bourse_direct.py', 'billcollector/bourse_direct_boundary.py',
+              for name in ('billcollector/archives.py', 'billcollector/collection.py',
+                       'billcollector/db.py', 'billcollector/downloads.py',
+                       'billcollector/runner.py', 'billcollector/notify.py',
+                       'billcollector/orchestrator.py', 'billcollector/bourse_direct.py', 'billcollector/bourse_direct_boundary.py',
                            'billcollector/throttle.py', 'billcollector/notice.py',
-                           'billcollector/downloads.py', 'billcollector/runner.py',
-                           'recipes_playwright/recipe-pw-schema.yaml')}
+                               'recipes_playwright/recipe-pw-schema.yaml')}
     log_text = (root/'container.log').read_text()
     packaged = next((json.loads(line)['packaged_source_sha256'] for line in log_text.splitlines()
                      if line.startswith('{"packaged_source_sha256"')), None)

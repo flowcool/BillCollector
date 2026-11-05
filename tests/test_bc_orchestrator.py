@@ -309,9 +309,14 @@ class RunNotificationTests(OrchestratorTestBase):
         self.assertEqual(self.db.get_task(self.task_id)["status"], "idle")
         self.assertNotIn("private secret", str(logs.output))
 
-    def test_success_does_not_send(self):
+    def test_success_sends_the_base_message_without_outcome(self):
+        # The stub runner finalizes without collection_outcome/date_from,
+        # so the monitor sends the base success message (issue #24:
+        # successful runs are notified with their outcome when known).
         self.assertEqual(self._run_and_drain(self._orch("ok")), 0)
-        self.post.assert_not_called()
+        self.post.assert_called_once()
+        self.assertEqual(self.post.call_args.kwargs["data"],
+                         b"A collector run finished successfully.")
 
     def test_interrupted_shutdown_sends_once(self):
         orch = self._orch("crash", sleep=30)
@@ -913,6 +918,81 @@ class JobCancelTests(OrchestratorTestBase):
         run = self.db.list_runs(t1)[0]
         self.assertEqual(run["result"], "interrupted")
         self.assertEqual(self.db.get_task(t1)["status"], "idle")
+
+
+class _RetryDocument:
+    suggested_filename = "invoice.pdf"
+    url = "https://fixture.invalid/invoice"
+
+    def save_as(self, path):
+        Path(path).write_bytes(b"%PDF-1.4 synthetic document")
+
+
+class RetryDeliveryTests(OrchestratorTestBase):
+    """B4: retry_delivery spawns the recovery subprocess for one row and
+    reports a sanitized outcome (never the child's raw stderr)."""
+
+    def _track_row(self, state):
+        from billcollector import downloads
+        self.db.set_setting("download_dir", str(self.tmp / "output"))
+        task_id = self.db.create_task("svc", "u1")
+        run_id = self.db.create_run(task_id)
+
+        def unavailable(record):
+            raise OSError("synthetic consumer unavailable")
+
+        if state == "failed":
+            with mock.patch.object(downloads, "CONSUMERS", [unavailable]):
+                record = downloads.track_download(_RetryDocument(), run_id,
+                                                  {"id": task_id}, self.db)
+        else:
+            record = downloads.track_download(_RetryDocument(), run_id,
+                                              {"id": task_id}, self.db)
+            if state == "published":
+                row_id = self.db.find_download_by_sha(
+                    task_id, record["sha256"])["id"]
+                self.db.set_download_state(row_id, "published")
+        return self.db.find_download_by_sha(task_id, record["sha256"])
+
+    def test_retry_delivery_delivers_a_failed_row_in_a_subprocess(self):
+        row = self._track_row("failed")
+        self.assertEqual(row["state"], "failed")
+        ok, error = asyncio.run(self.orch.retry_delivery(row["id"]))
+        self.assertIs(ok, True)
+        self.assertIsNone(error)
+        fresh = self.db.get_download(row["id"])
+        self.assertEqual(fresh["state"], "consumed")
+        self.assertEqual(fresh["delivery_attempts"], 2)
+
+    def test_retry_delivery_refuses_a_consumed_row_with_a_sanitized_error(self):
+        row = self._track_row("consumed")
+        self.assertEqual(row["state"], "consumed")
+        ok, error = asyncio.run(self.orch.retry_delivery(row["id"]))
+        self.assertIs(ok, False)
+        self.assertEqual(error, "Manual delivery retry failed (exit code 1)")
+        self.assertEqual(self.db.get_download(row["id"])["state"], "consumed")
+
+    def test_retry_delivery_times_out_and_reaps_the_blocked_child(self):
+        from billcollector import downloads
+        row = self._track_row("published")
+        self.db.set_setting("download_recovery_timeout_seconds", "1")
+        with downloads._publication_lock(
+                Path(self.db.get_setting("download_dir")).resolve()):
+            ok, error = asyncio.run(self.orch.retry_delivery(row["id"]))
+        self.assertIs(ok, False)
+        self.assertEqual(error, "Manual delivery retry timed out after 1s")
+        self.assertEqual(self.db.get_download(row["id"])["state"], "published")
+
+    def test_retry_delivery_with_invalid_timeout_setting_does_not_spawn(self):
+        row = self._track_row("failed")
+        self.db.set_setting("download_recovery_timeout_seconds", "bogus")
+        with mock.patch("asyncio.create_subprocess_exec") as spawn:
+            ok, error = asyncio.run(self.orch.retry_delivery(row["id"]))
+        spawn.assert_not_called()
+        self.assertIs(ok, False)
+        self.assertEqual(error,
+                         "Download recovery timeout setting is invalid; "
+                         "retry not started")
 
 
 if __name__ == "__main__":

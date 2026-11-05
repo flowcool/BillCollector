@@ -111,6 +111,152 @@ class ProfileResetTests(unittest.TestCase):
         self.assertIn("does not exist", err)
 
 
+class RunOutcomeColumnsTests(unittest.TestCase):
+    """C4: the additive collection_outcome + date_from Run migration."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.db = bcd.Database(path=self.root / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp.cleanup()
+
+    def run_columns(self, conn):
+        return {r["name"] for r in
+                conn.execute("PRAGMA table_info(Run)").fetchall()}
+
+    def test_fresh_db_has_the_run_outcome_columns(self):
+        cols = self.run_columns(self.db.conn)
+        self.assertIn("collection_outcome", cols)
+        self.assertIn("date_from", cols)
+
+    def test_migration_adds_the_columns_to_a_pre_existing_db(self):
+        # A DB file created with the pre-C4 Run schema (no
+        # collection_outcome / date_from columns).
+        legacy = self.root / "legacy.db"
+        conn = sqlite3.connect(legacy)
+        conn.execute(
+            """CREATE TABLE Run (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   task_id INTEGER NOT NULL,
+                   pid INTEGER,
+                   display INTEGER,
+                   novnc_port INTEGER,
+                   log_path TEXT,
+                   control_sock TEXT,
+                   started_at TEXT,
+                   ended_at TEXT,
+                   result TEXT,
+                   pause_reason TEXT,
+                   pause_prompt TEXT,
+                   pause_context TEXT,
+                   pause_deadline_at TEXT,
+                   notes TEXT)""")
+        conn.execute("INSERT INTO Run (task_id, result) VALUES (1, 'success')")
+        conn.commit()
+        conn.close()
+
+        db2 = bcd.Database(path=legacy)
+        try:
+            cols = self.run_columns(db2.conn)
+            self.assertIn("collection_outcome", cols)
+            self.assertIn("date_from", cols)
+            # The migration is additive: the pre-existing row survives with
+            # NULL outcome and window values.
+            row = db2.get_run(1)
+            self.assertEqual(row["result"], "success")
+            self.assertIsNone(row["collection_outcome"])
+            self.assertIsNone(row["date_from"])
+        finally:
+            db2.close()
+
+    def test_migration_is_idempotent(self):
+        # A second open of the same file re-runs the PRAGMA check without
+        # error and without duplicating a column.
+        bcd.Database(path=self.root / "again.db")
+        db2 = bcd.Database(path=self.root / "again.db")
+        try:
+            cols = [r["name"] for r in
+                    db2.conn.execute("PRAGMA table_info(Run)").fetchall()]
+            self.assertEqual(cols.count("collection_outcome"), 1)
+            self.assertEqual(cols.count("date_from"), 1)
+        finally:
+            db2.close()
+
+
+class DeliveryAttemptsColumnTests(unittest.TestCase):
+    """C8: the additive delivery_attempts Download migration."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.db = bcd.Database(path=self.root / "test.db")
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp.cleanup()
+
+    def download_columns(self, conn):
+        return {r["name"] for r in
+                conn.execute("PRAGMA table_info(Download)").fetchall()}
+
+    def test_fresh_db_has_the_delivery_attempts_column(self):
+        self.assertIn("delivery_attempts",
+                      self.download_columns(self.db.conn))
+
+    def test_migration_adds_the_column_to_a_pre_existing_db(self):
+        # A DB file created with the pre-C8 Download schema (no
+        # delivery_attempts column).
+        legacy = self.root / "legacy.db"
+        conn = sqlite3.connect(legacy)
+        conn.execute(
+            """CREATE TABLE Download (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id INTEGER, task_id INTEGER,
+                   url TEXT, filename TEXT, size INTEGER,
+                   sha256 TEXT, saved_path TEXT,
+                   created_at TEXT,
+                   duplicate_of_id INTEGER,
+                   state TEXT NOT NULL DEFAULT 'consumed',
+                   staged_path TEXT,
+                   source_identity TEXT,
+                   revision_sha256 TEXT)""")
+        conn.execute(
+            "INSERT INTO Download (run_id, task_id, url, filename, size, "
+            "sha256, saved_path, created_at, state) "
+            "VALUES (1, 1, 'http://x/a.pdf', 'a.pdf', 10, 'sha-AAA', "
+            "'/tmp/a.pdf', '2026-01-01 00:00:00', 'consumed')")
+        conn.commit()
+        conn.close()
+
+        db2 = bcd.Database(path=legacy)
+        try:
+            self.assertIn("delivery_attempts",
+                          self.download_columns(db2.conn))
+            # The migration is additive: the pre-existing row survives with
+            # a NULL attempt count.
+            rows = db2.list_downloads()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["filename"], "a.pdf")
+            self.assertIsNone(rows[0]["delivery_attempts"])
+        finally:
+            db2.close()
+
+    def test_migration_is_idempotent(self):
+        # A second open of the same file re-runs the PRAGMA check without
+        # error and without duplicating the column.
+        bcd.Database(path=self.root / "again.db")
+        db2 = bcd.Database(path=self.root / "again.db")
+        try:
+            cols = [r["name"] for r in
+                    db2.conn.execute("PRAGMA table_info(Download)").fetchall()]
+            self.assertEqual(cols.count("delivery_attempts"), 1)
+        finally:
+            db2.close()
+
+
 class DatabaseTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

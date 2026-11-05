@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 
+from .archives import pdf_download
 from .interrupt import RunInterrupted
 
 MAX_DOWNLOAD_ITEMS = 200
@@ -189,9 +191,9 @@ def _snapshot(locator, key_attribute):
     return tuple(keys)
 
 
-def _validate_snapshot(keys, max_items):
+def _validate_snapshot(keys, max_items, allow_empty=False):
     count = len(keys)
-    if count == 0:
+    if count == 0 and not allow_empty:
         raise CollectionError("download list is empty")
     if count > max_items:
         raise CollectionError(
@@ -363,30 +365,33 @@ def download_all(page, context, locator, save_download, options,
     list is re-read after every click and the selected element handle is
     checked immediately before use, so re-rendering is supported but shrink,
     reorder, replacement and ambiguous controls fail closed.  Successfully
-    persisted records remain committed when a later item fails.
+    persisted records remain committed when a later item fails.  With
+    ``allow_empty`` an empty listing completes as an empty result (and serves
+    as the run's empty proof, C4); without it the empty listing fails closed.
 
-    ``incremental`` and ``unpack`` need a runner that persists source keys
-    (``keyed_save``): ``save_download`` then receives ``source_key`` and
-    ``unpack`` keywords, and known keys arrive through ``completed_keys``.
+    Incremental collection requires a keyed persistence adapter. It receives
+    source_key as a keyword; completed_keys contains already persisted keys.
     """
     options = _options(
         options,
         names={
             "key_attribute", "max_items", "timeout_ms", "event_window_ms",
-            "incremental", "unpack",
+            "allow_empty", "incremental", "unpack",
         },
     )
     incremental = options.get("incremental", False)
     if not isinstance(incremental, bool):
         raise CollectionError("incremental must be a boolean")
-    unpack = options.get("unpack")
-    if unpack not in (None, "pdf"):
-        raise CollectionError("unpack must be 'pdf'")
-    if (incremental or unpack) and not keyed_save:
-        raise CollectionError("incremental and unpack are not supported by this runner")
+    if incremental and not keyed_save:
+        raise CollectionError("incremental is not supported by this runner")
+    if "unpack" in options and options["unpack"] != "pdf":
+        raise CollectionError("unpack must be pdf when supplied")
     key_attribute = options.get("key_attribute")
     if not isinstance(key_attribute, str) or not key_attribute.strip():
         raise CollectionError("key_attribute must be a non-empty string")
+    allow_empty = options.get("allow_empty", False)
+    if not isinstance(allow_empty, bool):
+        raise CollectionError("allow_empty must be a boolean")
     max_items = _positive_int(
         options, "max_items", maximum=MAX_DOWNLOAD_ITEMS
     )
@@ -403,7 +408,9 @@ def download_all(page, context, locator, save_download, options,
         total_deadline = min(total_deadline, deadline)
 
     keys = _snapshot(locator, key_attribute)
-    _validate_snapshot(keys, max_items)
+    _validate_snapshot(keys, max_items, allow_empty=allow_empty)
+    if not keys:
+        return []
     if completed_keys is None:
         completed_keys = set()
     records = []
@@ -450,15 +457,15 @@ def download_all(page, context, locator, save_download, options,
                 before_download()
 
             def save_completed(download):
-                if keyed_save:
-                    record = save_download(
-                        download,
-                        source_key=(source_key(key_attribute, expected_key)
-                                    if incremental else None),
-                        unpack=unpack,
-                    )
-                else:
-                    record = save_download(download)
+                prepared = (pdf_download(download) if options.get("unpack") == "pdf"
+                            else nullcontext(download))
+                with prepared as document:
+                    if incremental:
+                        record = save_download(
+                            document, source_key=source_key(key_attribute, expected_key)
+                        )
+                    else:
+                        record = save_download(document)
                 completed_keys.add(expected_key)
                 return record
 

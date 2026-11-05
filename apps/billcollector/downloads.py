@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from uuid import uuid4
 
-from . import config, notice
+from . import config, notice, notify
 from .consumers import CONSUMERS
 from .interrupt import RunInterrupted
 from .redaction import sanitize_url
@@ -145,25 +145,44 @@ def _journal_root(target, db):
     return target / ".billcollector" / identity
 
 
+def _strict_delivery(row, db):
+    values = dict(row)
+    source = values.get('source_identity')
+    return values.get('delivery_policy') == 'bourse-direct' or (
+        source is not None
+        and db.get_setting(f"bourse_direct_pending_{row['task_id']}") == source)
+
+
+def can_retry_delivery(row, db):
+    """Generic retries cannot replay strict provider effects or unknown states."""
+    return (row is not None and row['duplicate_of_id'] is None
+            and row['state'] in ('staged', 'published', 'failed')
+            and not _strict_delivery(row, db))
+
+
 def _deliver(row, db):
     if row["duplicate_of_id"] is not None:
         return
     record = {k: row[k] for k in _FIELDS}
     record["idempotency_key"] = f"{row['task_id']}:{row['sha256']}"
-    policy = row.get('delivery_policy') if isinstance(row, dict) else row['delivery_policy']
-    source = row.get('source_identity') if isinstance(row, dict) else row['source_identity']
     # Preserve pre-policy BD journal rows only when the durable acquisition key
     # positively binds this exact source. Do not convert generic notice history.
-    strict = policy == 'bourse-direct' or (source is not None and
-        db.get_setting(f"bourse_direct_pending_{row['task_id']}") == source)
+    strict = _strict_delivery(row, db)
     if strict:
         # Commit before any external effect. A crash never permits automatic replay.
         db.set_download_state(row['id'], 'delivery_uncertain')
+    previous_state = row["state"] if "state" in row else "published"
     failed = False
     for consume in CONSUMERS:
         saved = Path(row["saved_path"])
         if saved.exists() and (not saved.is_file() or sha256_of(saved) != row["sha256"]):
-            raise _RecoveryFailure("Published download checksum mismatch", 65)
+            if strict:
+                raise _RecoveryFailure("Published download checksum mismatch", 65)
+            # A checksum mismatch is a delivery failure like a consumer
+            # exception: stop the loop and skip the remaining consumers.
+            failed = True
+            logger.error("Published download checksum mismatch; delivery failed")
+            break
         try:
             consume(record.copy())
         except RunInterrupted:
@@ -171,12 +190,17 @@ def _deliver(row, db):
         except Exception:
             failed = True
             # Consumer exceptions can contain document URLs or credentials.
-            logger.error("Download consumer failed; delivery remains pending")
+            logger.error("Download consumer failed; delivery failed")
             if strict:
                 break
+    db.increment_download_attempts(row["id"])
     if strict and failed:
         raise NoticeDeliveryUncertain('Notice delivery is uncertain; reconcile before another action')
-    if not failed:
+    if failed:
+        db.set_download_state(row["id"], "failed")
+        if previous_state != "failed":
+            notify.notify_delivery_failed(db, row)
+    else:
         db.set_download_state(row["id"], "consumed")
 
 
@@ -271,7 +295,7 @@ def _recover_locked(db, target):
         if row["state"] == "staged":
             _publish(row, db)
             row["state"] = "published"
-        if row["state"] == "published":
+        if row["state"] in ("published", "failed"):
             try:
                 _deliver(row, db)
             except NoticeDeliveryUncertain:
@@ -299,6 +323,29 @@ def recover_downloads(db):
     for target in sorted(targets):
         with _publication_lock(target):
             _recover_locked(db, target)
+
+
+def retry_delivery(db, download_id):
+    """Manually retry the delivery of one row (at-least-once, issue #24).
+
+    Missing, duplicate, consumed and strict-provider rows are refused.
+    Unknown or uncertain states are also refused. A staged row is
+    published first; the row is then delivered on its stable idempotency
+    key under the target's publication lock, the same path startup
+    recovery uses. True iff the row ends consumed.
+    """
+    row = db.get_download(download_id)
+    if not can_retry_delivery(row, db):
+        return False
+    with _publication_lock(Path(row["saved_path"]).parent):
+        row = db.get_download(download_id)
+        if not can_retry_delivery(row, db):
+            return False
+        if row["state"] == "staged":
+            _publish(row, db)
+        row = dict(db.get_download(download_id))
+        _deliver(row, db)
+    return db.get_download(download_id)["state"] == "consumed"
 
 
 def track_download(download, run_id, task, db, *, source_key=None, unpack=None, identity=None,
@@ -435,10 +482,26 @@ def recover_downloads_in_subprocess(db):
 if __name__ == "__main__":
     from .db import Database
 
+    args = sys.argv[1:]
+    retry_id = None
+    if "--retry" in args:
+        index = args.index("--retry")
+        if index + 1 >= len(args):
+            sys.exit(2)
+        try:
+            retry_id = int(args[index + 1])
+        except ValueError:
+            sys.exit(2)
+        args = args[:index] + args[index + 2:]
+    if len(args) != 1:
+        sys.exit(2)
     database = None
     try:
-        database = Database(path=sys.argv[1])
-        recover_downloads(database)
+        database = Database(path=args[0])
+        if retry_id is None:
+            recover_downloads(database)
+        elif not retry_delivery(database, retry_id):
+            sys.exit(1)
     except _RecoveryFailure as error:
         sys.exit(error.exit_code)
     except PermissionError:

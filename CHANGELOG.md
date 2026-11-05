@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Finalize an interrupted run when a shutdown signal arrives after its row
+  commits but before startup enters the step loop. Preserve cleanup and the
+  collection outcome at both commit and task-status boundaries.
+
 - Native phased login accepts final sessions after any submission and skips
   optional phases when a later state is proven. Preserve one durable attempt,
   fresh OTP resolution and verification-only resume.
@@ -56,7 +60,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Opt-in daemon terminal ntfy pushes (`ntfy_topic`) for failed, interrupted and
   attention-timeout runs. Shutdown, dashboard Stop and startup orphan recovery
-  notify too. Success and pause cancellation stay silent. Fixed terminal
+  notify too. Successful runs now notify with their collection outcome (see below). Pause
+  cancellation stays silent. Fixed terminal
   messages contain no URLs, account details or secrets; send failures only log.
 
 - `download_all` options `incremental` (persisted per-task source keys; later runs
@@ -82,6 +87,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pause notifications now default to an empty `ntfy_topic` (opt-in).
   Operators who used the implicit `billcollector` topic must set their
   topic in Settings. Existing stored topics remain active.
+- Opt-in `download_all` option `unpack: pdf` validates a bounded ZIP with one
+  safe regular PDF member and saves its unchanged bytes. Default downloads
+  remain unchanged. The calendar action does not support this option. (issue #50)
+- Opt-in daemon `download_all` incremental keys scoped to each task and key
+  attribute. Known items skip acquisition. A verified all-known list completes
+  successfully with an explicit log. Existing rows are not backfilled and
+  default acquisition stays unchanged. Keys do not detect corrections (issue #50).
+- Run-result semantics (issue #24, F06): a run now separates run health
+  from what the collection proved. `Run.result` keeps its values; two
+  additive columns (migrated in place, no backfill) carry the rest -
+  `Run.collection_outcome` (`new_documents` / `duplicates_only` /
+  `proved_empty` / `partial` / `failed`, derived at finalization from the
+  run's committed rows and its empty proof) and `Run.date_from` (the
+  effective window start, so the statement is auditable). The three
+  healthy outcomes map to `success` (exit 0): a healthy empty collection
+  and a duplicates-only run are no longer failures; `partial` and
+  `failed` stay `failure`, with the outcome saying why. `download_all`
+  gains the opt-in `allow_empty` (default off): an empty listing then
+  completes with zero records and proves the window empty; without it an
+  empty listing fails closed as before. The terminal notification now
+  also sends for successful runs and carries the outcome and window
+  start; the dashboard last-run cell and the task-detail run history
+  show the outcome.
+- Delivery-state exposure (issue #24, F10): each Download row exposes its
+  delivery state - `downloaded` (`staged`), `pending delivery` (`published`),
+  `delivered` (`consumed`), and `failed delivery (N)` (new `failed` state;
+  additive `Download.delivery_attempts` counter, no backfill). A consumer
+  failure or a published-file checksum mismatch moves the row to `failed`
+  without failing the run and sends one best-effort ntfy notice on the first
+  transition to `failed` only. Two retry paths re-deliver the row
+  at-least-once on the task + sha256 key with no automatic retry cap: startup
+  recovery now also retries `failed` rows (the same code path as pending
+  rows), and the Downloads page and the task-detail downloads section gain a
+  Delivery column plus a per-row **Retry delivery** action that re-delivers
+  the row in a runner subprocess (consumers stay out of the UI process; the
+  confirmation states the at-least-once semantics). Duplicate rows are never
+  delivered and cannot be retried.
 - Daemon recipe validation checks the installed Playwright method chains,
   argument names and types, properties, and reserved `wait_user` options (C3,
   issue #27). UI save and run start use the same gate before vault or browser

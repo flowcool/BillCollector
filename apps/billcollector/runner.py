@@ -138,27 +138,55 @@ def step_attempts(graceful: bool) -> int:
     return 1 if graceful else MAX_STEP_ATTEMPTS
 
 
-def run_result(aborted: bool, files_downloaded: list, pause_outcome=None, *,
-               known_source_count=0) -> str:
-    """Terminal Run.result of a finished run.
+HEALTHY_OUTCOMES = ("new_documents", "duplicates_only", "proved_empty")
+
+
+def derive_outcome(completed: bool, rows: list, empty_proven: bool,
+                   *, all_items_known: bool = False) -> str:
+    """What this run's collection proved for its window (C4, issue #24).
+
+    Derived at finalization from the run's own committed data (rows are
+    the run's Download rows; a new document is a row without a
+    duplicate_of_id): an incomplete run is partial when it committed
+    rows, failed otherwise; a completed run is new_documents on any new
+    row, duplicates_only when every row duplicates an existing identity,
+    proved_empty when the collection proved its window empty under
+    allow_empty, and failed when neither rows nor an empty proof exist.
+    A completed run with no rows and no empty proof is duplicates_only
+    when the incremental collection verified every item known (#50, per
+    the C4 contract on issue #24), failed otherwise."""
+    if not completed:
+        return "partial" if rows else "failed"
+    if any(row["duplicate_of_id"] is None for row in rows):
+        return "new_documents"
+    if rows:
+        return "duplicates_only"
+    if empty_proven:
+        return "proved_empty"
+    if all_items_known:
+        return "duplicates_only"
+    return "failed"
+
+
+def run_result(completed: bool, rows: list, empty_proven: bool,
+               pause_outcome=None, *, all_items_known: bool = False) -> str:
+    """Terminal Run.result of a finished run (C4, issue #24).
 
     A pause outcome is terminal in itself: cancel -> ``cancelled``,
     timeout -> ``needs_attention`` (decision: the operator can retry a
-    timed-out run manually later). Otherwise the legacy success contract:
-    success requires a completed run (no abort) with at least one
-    successfully downloaded file, or a completed incremental collection that
-    explicitly skipped committed source keys."""
+    timed-out run manually later). Otherwise the result follows the
+    collection outcome: the healthy outcomes (new_documents,
+    duplicates_only, proved_empty) map to ``success``, partial and
+    failed to ``failure``. The exit code stays 0 for success only.
+    all_items_known marks a verified incremental all-known no-op (issue
+    #50), logged explicitly by the collection adapter."""
     if pause_outcome == "cancel":
         return "cancelled"
     if pause_outcome == "timeout":
         return "needs_attention"
-    if aborted:
-        return "failure"
-    if not files_downloaded:
-        return "success" if known_source_count > 0 else "failure"
-    if not all(entry["result"] == "success" for entry in files_downloaded):
-        return "failure"
-    return "success"
+    outcome = derive_outcome(completed, rows, empty_proven,
+                             all_items_known=all_items_known)
+    return "success" if outcome in HEALTHY_OUTCOMES else "failure"
 
 
 def _fresh_otp(bcs):
@@ -199,9 +227,11 @@ class _RunContext:
         self.debug = debug
         self.eof_noticed = False
         self.files_downloaded = []
-        self.incremental_known_count = 0
         self.collection_filenames = set()
         self.collection_completed_keys = {}
+        self.collection_actions_ran = 0
+        self.collection_actions_proven = 0
+        self.all_items_known = False
         self.context = None
         self.page = None
         self.bcs = ServiceObj(
@@ -520,6 +550,10 @@ def _collection_actions(ctx, step=None):
         completed_by_step = {}
         ctx.collection_completed_keys = completed_by_step
     completed_keys = completed_by_step.setdefault(id(step), set())
+    if getattr(ctx, "collection_actions_ran", None) is None:
+        ctx.collection_actions_ran = 0
+    if getattr(ctx, "collection_actions_proven", None) is None:
+        ctx.collection_actions_proven = 0
 
     def paginate(locator, options):
         return collection.click_until_absent(ctx.page, locator, options)
@@ -565,14 +599,17 @@ def _collection_actions(ctx, step=None):
         return record
 
     def download(locator, options):
-        known_count = 0
-        if isinstance(options, dict) and options.get("incremental") is True:
+        # Empty-proof accounting (C4, issue #24): count the call before the
+        # action so a raised (graceful-failed) action counts as ran, never
+        # proven; only a completed empty result under allow_empty proves the
+        # listing empty.
+        ctx.collection_actions_ran += 1
+        incremental = isinstance(options, dict) and options.get("incremental") is True
+        if incremental:
             prefix = collection.source_key(options.get("key_attribute"), "")
             completed_keys.update(
                 key[len(prefix):] for key in ctx.db.known_source_keys(ctx.task["id"])
                 if key.startswith(prefix))
-            known_count = sum(key in completed_keys for key in
-                              collection._snapshot(locator, options.get("key_attribute")))
         records = collection.download_all(
             ctx.page,
             ctx.context,
@@ -582,7 +619,12 @@ def _collection_actions(ctx, step=None):
             completed_keys=completed_keys,
             keyed_save=True,
         )
-        ctx.incremental_known_count = getattr(ctx, "incremental_known_count", 0) + known_count
+        if (not records and isinstance(options, dict)
+                and options.get("allow_empty") is True):
+            ctx.collection_actions_proven += 1
+        if incremental and not records:
+            ctx.all_items_known = True
+            logger.info("Incremental collection succeeded: all items known")
         return records
 
     def replacement_calendar(root, options):
@@ -1143,6 +1185,11 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None, collection_m
 
         result = "failure"
         files = []
+        completed = False
+        pause_outcome = None
+        rows = []
+        empty_proven = False
+        all_items_known = False
         # The effective vault API values (Settings win over env) are exported
         # into the process environment before any vault call, so the vault
         # transport's BW_API_HOST read and the run context's TOTP re-fetch
@@ -1152,6 +1199,7 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None, collection_m
         os.environ["BW_API_HOST"] = api_host
         children = None
         run_id = None
+        ctx = None
         try:
             # The row records this process' pid so the orchestrator (C7.2)
             # can match the spawned subprocess to the row it created, and
@@ -1159,11 +1207,11 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None, collection_m
             # is alive. It is created inside the release scope below so a
             # shutdown signal (C7.5) in any window after the display claim
             # still releases the display and finalizes the row.
-            run_id = db.create_run(task_id, pid=os.getpid(),
-                                   display=display_number,
-                                   novnc_port=websockify_port)
-            db.set_task_status(task_id, "running")
             try:
+                run_id = db.create_run(task_id, pid=os.getpid(),
+                                       display=display_number,
+                                       novnc_port=websockify_port)
+                db.set_task_status(task_id, "running")
                 children = _start_display_stack(db, run_id, display_number)
                 os.environ["DISPLAY"] = f":{display_number}"
                 credentials = _vault_preflight(task, db)
@@ -1171,9 +1219,27 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None, collection_m
                 ctx.bcs.date_context = dates
                 ctx.bourse_direct_candidate = adapter_candidate
                 files, aborted, pause_outcome = _run_recipe(ctx, recipe)
-                result = run_result(aborted, files, pause_outcome,
-                                    known_source_count=ctx.incremental_known_count)
+                completed = not aborted
+                rows = db.list_downloads(run_id=run_id)
+                # The empty proof holds when at least one collection action
+                # ran and every started download_all completed empty under
+                # allow_empty (0/0 - no actions - is no proof).
+                ran = ctx.collection_actions_ran
+                proven = ctx.collection_actions_proven
+                empty_proven = ran > 0 and ran == proven
+                all_items_known = ctx.all_items_known
+                result = run_result(
+                    completed, rows, empty_proven, pause_outcome,
+                    all_items_known=all_items_known,
+                )
             except RunInterrupted:
+                if run_id is None:
+                    # A signal can arrive after SQLite committed the row but
+                    # before create_run returned its id to this frame.
+                    committed = db.get_run_for_pid(task_id, os.getpid())
+                    if (committed is not None and committed["result"] is None
+                            and committed["display"] == display_number):
+                        run_id = committed["id"]
                 # A shutdown signal (SIGTERM/SIGINT) reached the run: the
                 # teardown below reaps the display stack and finalizes the
                 # row with the interruption result.
@@ -1199,23 +1265,35 @@ def _run_task(task_id: int, debug: bool = False, *, date_from=None, collection_m
                 # leaves the row open.
                 if children is not None:
                     display.stop_display_stack(children)
-                # The run row always ends with a terminal result, even when
-                # the vault preflight or an unexpected error stopped the
-                # run before the step loop ran.
-                db.update_run(run_id, result=result, ended_at=now())
-                settle_attempt(db, task_id, run_id)
-                # A finished run releases the task: the 'waiting' status
-                # set by a pause is terminal here (resume, cancel and
-                # timeout all end the run), so the task goes back to idle
-                # and the scheduler's row lock can claim it again.
-                db.release_task_run(task_id)
+                if run_id is not None:
+                    # An interrupted run may have committed download rows
+                    # before the signal landed: refresh the committed rows
+                    # at finalization so the outcome always reflects them.
+                    rows = db.list_downloads(run_id=run_id)
+                    # The run row always ends with a terminal result, even
+                    # when the vault preflight or an unexpected error stopped
+                    # the run before the step loop ran.
+                    db.update_run(run_id, result=result, ended_at=now(),
+                                  collection_outcome=derive_outcome(
+                                      completed, rows, empty_proven,
+                                      all_items_known=all_items_known),
+                                  date_from=dates.date_from.isoformat())
+                    settle_attempt(db, task_id, run_id)
+                    # A finished run releases the task: the 'waiting' status
+                    # set by a pause is terminal here (resume, cancel and
+                    # timeout all end the run), so the task goes back to idle
+                    # and the scheduler's row lock can claim it again.
+                    db.release_task_run(task_id)
         finally:
             # The claim is released with the run, so a finished (or
             # interrupted) run never leaks a display - even when the
             # shutdown signal arrived before the Run row existed.
             display.release_display(display_number)
         if result == "success":
-            logger.info(f"Task {task_id} run {run_id} finished with downloaded file(s) {files}.")
+            if not files:
+                logger.info(f"Task {task_id} run {run_id} succeeded: all items known.")
+            else:
+                logger.info(f"Task {task_id} run {run_id} finished with downloaded file(s) {files}.")
             return 0
         logger.error(f"Task {task_id} run {run_id} failed (result={result}, downloads={files}).")
         return 1
