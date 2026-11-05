@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Refresh APT and its runtime library during image builds so the pinned base
+  receives the available package security updates.
+
 - Finalize an interrupted run when a shutdown signal arrives after its row
   commits but before startup enters the step loop. Preserve cleanup and the
   collection outcome at both commit and task-status boundaries.

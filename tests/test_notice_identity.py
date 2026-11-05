@@ -302,7 +302,8 @@ def test_generic_notice_identity_keeps_generic_consumer_recovery(tmp_path, monke
     downloads.track_download(Download(pdf(tmp_path/'original.pdf')),
                              db.create_run(task), db.get_task(task), db, identity=POLICY)
     row = db.list_downloads(task_id=task)[0]
-    assert row['state'] == 'published' and row['delivery_policy'] is None
+    assert row['state'] == 'failed' and row['delivery_policy'] is None
+    assert row['delivery_attempts'] == 1
     downloads.recover_downloads(db)
     assert len(calls) == 2
     assert db.list_downloads(task_id=task)[0]['state'] == 'consumed'

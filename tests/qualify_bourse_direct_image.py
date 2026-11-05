@@ -31,6 +31,8 @@ assert os.getuid() == 1003 and os.getgid() == 1000
 assert pypdf.__version__ == '6.21.4'
 shutil.copytree('/checks/tests', root/'tests')
 shutil.copytree('/apps/recipes_playwright', root/'apps/recipes_playwright')
+# Stub runner subprocesses resolve packaged modules through the fixture layout.
+(root/'apps/billcollector').symlink_to('/apps/billcollector', target_is_directory=True)
 hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()
           for name in ('billcollector/archives.py', 'billcollector/collection.py',
                        'billcollector/db.py', 'billcollector/downloads.py',
@@ -61,7 +63,8 @@ code = pytest.main([str(root/'tests/test_bc_login.py'),
                     str(root/'tests/test_bc_runner.py'),
                     str(root/'tests/test_bc_notify.py'),
                     str(root/'tests/test_bc_orchestrator.py'), '-p', 'pytest_asyncio.plugin',
-                    '-o', 'asyncio_mode=auto', '-q',
+                    '-o', 'asyncio_mode=auto',
+                    '-o', 'asyncio_default_fixture_loop_scope=function', '-q',
                     '--basetemp', str(root/'pytest-proof')])
 if code:
     sys.exit(code)
