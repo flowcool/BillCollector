@@ -112,7 +112,8 @@ def main():
                                      capture_output=True, text=True).stdout)[0]
     if image['Config']['Labels']['org.opencontainers.image.revision'] != revision:
         raise ValueError('Image revision differs from the selected engine')
-    command = ['docker', 'create', '--name', args.container_name, '-i', '--user', '1003:1000',
+    # The orchestration fixtures expect PID 1 to reap terminated grandchildren.
+    command = ['docker', 'create', '--init', '--name', args.container_name, '-i', '--user', '1003:1000',
                '--network', 'none', '--shm-size', '256m',
                '--security-opt', f'seccomp={engine}/docker/chromium-seccomp.json',
                '--mount', f'type=bind,src={engine}/tests,dst=/checks/tests,readonly',
