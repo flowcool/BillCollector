@@ -1,23 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Incremental source keys and ZIP PDF unpacking for download_all (no browser)."""
+"""Opt-in incremental download contract with synthetic, isolated fixtures."""
 
-import io
 import sqlite3
-import stat
 import sys
 import tempfile
 import unittest
-import zipfile
 from pathlib import Path
 from unittest import mock
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps"))
 
-from billcollector import collection  # noqa: E402
-from billcollector import db as bcd  # noqa: E402
-from billcollector import downloads as bcdl, runner  # noqa: E402
+from billcollector import collection, runner  # noqa: E402
 from tests.test_bc_collection import _Page, _Events, _Listing  # noqa: E402
+from billcollector import db as bcd  # noqa: E402
+from billcollector import downloads as bcdl  # noqa: E402
 
 PDF = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
 
@@ -30,14 +27,6 @@ class _StubDownload:
 
     def save_as(self, target):
         Path(target).write_bytes(self._data)
-
-
-def _zip(members):
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        for name, data in members.items():
-            archive.writestr(name, data)
-    return buffer.getvalue()
 
 
 class _Base(unittest.TestCase):
@@ -96,127 +85,215 @@ class SourceKeyTests(_Base):
             migrated.close()
 
 
-class IncrementalRunnerTests(_Base):
-    def collect(self, keys, *, attribute="data-key", incremental=True, task=None):
-        context = _Events()
-        page = _Page()
-        items = [{"data-key": key, attribute: key,
-                  "download": _StubDownload(PDF + key.encode(), key + ".pdf")} for key in keys]
-        listing = _Listing(page, context, items)
-        ctx = SimpleNamespace(page=page, context=context, run_id=self.rid,
-                              task={"id": task or self.tid}, db=self.db, files_downloaded=[])
-        runner._collection_actions(ctx)["download_all"](listing, {
-            "key_attribute": attribute, "max_items": 10, "timeout_ms": 1000,
-            "event_window_ms": 2, "incremental": incremental})
-        self.last_context = ctx
-        return listing.clicked
+class IncrementalCollectionTests(_Base):
+    options = {"key_attribute": "data-key", "max_items": 5,
+               "timeout_ms": 1000, "event_window_ms": 5, "incremental": True}
 
-    def test_new_session_skips_known_and_only_clicks_new_document(self):
-        self.assertEqual(self.collect(["a", "b"]), ["a", "b"])
-        self.assertEqual(self.collect(["a", "b"]), [])
-        self.assertEqual(runner.run_result(False, [], known_source_count=self.last_context.incremental_known_count), "success")
-        self.assertEqual(runner.run_result(False, []), "failure")
-        self.assertEqual(runner.run_result(True, [], known_source_count=2), "failure")
-        self.assertEqual(self.collect(["a", "b", "c"]), ["c"])
-        self.assertEqual(len(self.db.list_downloads()), 3)
+    def collect(self, keys, *, options=None, task=None, content=PDF):
+        page, context = _Page(), _Events()
+        listing = _Listing(page, context, [
+            {"data-key": key, "id": key,
+             "download": _StubDownload(content, f"{index}.pdf")}
+            for index, key in enumerate(keys)
+        ])
+        ctx = SimpleNamespace(page=page, context=context, files_downloaded=[],
+                              db=self.db, task=task or self.task,
+                              run_id=self.rid)
+        result = runner._collection_actions(ctx)["download_all"](
+            listing, self.options if options is None else options)
+        return ctx, listing, result
 
-    def test_other_task_attribute_and_nonincremental_are_not_skipped(self):
-        self.collect(["a"])
-        self.assertEqual(self.collect(["a"], attribute="data-other"), ["a"])
-        other = self.db.create_task("svc", "other")
-        self.assertEqual(self.collect(["a"], task=other), ["a"])
-        self.assertEqual(self.collect(["a"], incremental=False), ["a"])
+    def test_stable_keys_survive_restart_and_skip_only_known_items(self):
+        self.collect(["one"])
+        self.db.close()
+        self.db = bcd.Database(path=self.root / "test.db")
+        ctx, listing, records = self.collect(["one", "two"])
+        self.assertEqual(listing.clicked, ["two"])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(self.db.known_source_keys(self.tid),
+                         {"data-key=one", "data-key=two"})
+        self.assertEqual(runner.run_result(
+            True, self.db.list_downloads(run_id=self.rid), False), "success")
 
+    def test_all_known_is_explicit_success_without_a_fake_download(self):
+        self.collect(["one"])
+        with self.assertLogs(runner.logger, level="INFO") as logs:
+            ctx, listing, records = self.collect(["one"])
+        self.assertIn("all items known", " ".join(logs.output))
+        self.assertEqual(listing.clicked, [])
+        self.assertEqual(records, [])
+        self.assertEqual(ctx.files_downloaded, [])
+        self.assertEqual(len(self.db.list_downloads()), 1)
+        self.assertEqual(runner.run_result(True, [], False,
+                         all_items_known=ctx.all_items_known), "success")
+        for completed, rows, pause, expected in (
+            (False, [], None, "failure"),
+            (False, [{"duplicate_of_id": 1}], None, "failure"),
+            (True, [], "cancel", "cancelled"),
+            (True, [], "timeout", "needs_attention"),
+        ):
+            with self.subTest(expected=expected):
+                self.assertEqual(runner.run_result(completed, rows, False, pause,
+                         all_items_known=True), expected)
+        self.assertEqual(runner.run_result(True, [], False), "failure")
+        self.assertEqual(runner.derive_outcome(True, [], False,
+                         all_items_known=True), "duplicates_only")
+        self.assertEqual(runner.derive_outcome(True, [], True,
+                         all_items_known=True), "proved_empty")
+        self.assertEqual(runner.derive_outcome(True, [], False), "failed")
 
-class UnpackTests(_Base):
-    def track(self, data, name="factures.zip"):
-        return bcdl.track_download(_StubDownload(data, name), self.rid, self.task, self.db,
-                                   unpack="pdf")
+    def test_keys_do_not_detect_or_fetch_in_place_corrections(self):
+        self.collect(["one"])
+        _, listing, _ = self.collect(["one"], content=PDF + b"corrected")
+        self.assertEqual(listing.clicked, [])
+        self.assertEqual((self.out / "0.pdf").read_bytes(), PDF)
+        self.assertEqual(len(self.db.list_downloads()), 1)
 
-    def test_single_pdf_member_is_published_byte_identical(self):
-        record = self.track(_zip({"facture_2026_10.pdf": PDF}))
-        self.assertEqual(record["filename"], "facture_2026_10.pdf")
-        self.assertEqual(self.published(), ["facture_2026_10.pdf"])
-        self.assertEqual((self.out / "facture_2026_10.pdf").read_bytes(), PDF)
-        self.assertEqual(record["sha256"], bcdl.sha256_of(self.out / "facture_2026_10.pdf"))
+    def test_non_opt_in_fetches_corrections_and_does_not_seed_keys(self):
+        self.collect(["one"])
+        for incremental in (None, False):
+            options = {**self.options}
+            options.pop("incremental")
+            if incremental is not None:
+                options["incremental"] = incremental
+            with self.subTest(incremental=incremental), mock.patch.object(
+                self.db, "known_source_keys", side_effect=AssertionError("must not query")
+            ):
+                ctx, listing, _ = self.collect(["one"], options=options,
+                                               content=PDF + b"corrected")
+            self.assertEqual(listing.clicked, ["one"])
+            self.assertFalse(getattr(ctx, "all_items_known", False))
+            self.assertIsNone(self.db.list_downloads()[-1]["source_key"])
+        self.assertTrue(any(p.read_bytes() == PDF + b"corrected"
+                            for p in self.out.iterdir() if p.is_file()))
 
-    def test_original_utf8_bom_is_retained(self):
-        original = b"\xef\xbb\xbf" + PDF
-        record = self.track(_zip({"original.pdf": original}))
-        self.assertEqual(Path(record["saved_path"]).read_bytes(), original)
+    def test_task_and_attribute_scopes_are_independent(self):
+        self.collect(["one"])
+        other = {"id": self.db.create_task("svc", "u2")}
+        _, listing, _ = self.collect(["one"], task=other)
+        self.assertEqual(listing.clicked, ["one"])
+        _, listing, _ = self.collect(["one"], options={**self.options, "key_attribute": "id"})
+        self.assertEqual(listing.clicked, ["one"])
+        self.assertEqual(self.db.known_source_keys(self.tid), {"data-key=one", "id=one"})
 
-    def test_symlink_and_unsafe_directory_entries_fail_closed(self):
-        for name, mode in [("link.pdf", stat.S_IFLNK | 0o777),
-                           ("directory.pdf", stat.S_IFDIR | 0o755),
-                           ("../", stat.S_IFDIR | 0o755),
-                           ("C:invoice.pdf", stat.S_IFREG | 0o600)]:
-            buffer = io.BytesIO()
-            with zipfile.ZipFile(buffer, "w") as archive:
-                info = zipfile.ZipInfo(name)
-                info.external_attr = mode << 16
-                archive.writestr(info, PDF)
-                if name.endswith("/"):
-                    archive.writestr("ok.pdf", PDF)
-            with self.subTest(name=name), self.assertRaises(ValueError):
-                self.track(buffer.getvalue())
-        self.assertEqual(self.db.list_downloads(), [])
+    def test_invalid_lists_are_not_all_known_success(self):
+        self.collect(["one"])
+        for keys in ([], ["one", "one"], [""], [str(i) for i in range(6)]):
+            with self.subTest(keys=keys), self.assertRaises(collection.CollectionError):
+                self.collect(keys)
 
-    def test_same_pdf_in_a_different_zip_is_a_duplicate(self):
-        self.track(_zip({"f.pdf": PDF}))
-        second = self.track(_zip({"f.pdf": PDF, "dir/": b""}))
-        self.assertTrue(second["duplicate"])
-        self.assertEqual(self.published(), ["f.pdf"])
+    def test_partial_failure_keeps_only_committed_keys_for_retry(self):
+        track = bcdl.track_download
+        calls = 0
 
-    def test_invalid_archives_fail_closed_without_publication(self):
-        cases = {
-            "not a zip": PDF,
-            "no member": _zip({}),
-            "two members": _zip({"a.pdf": PDF, "b.pdf": PDF}),
-            "not pdf name": _zip({"a.txt": PDF}),
-            "path": _zip({"sub/a.pdf": PDF}),
-            "not pdf bytes": _zip({"a.pdf": b"hello"}),
-        }
-        for label, data in cases.items():
-            with self.subTest(label), self.assertRaises(ValueError):
-                self.track(data)
-        self.assertFalse(self.out.exists() and self.published())
-        self.assertEqual(self.db.list_downloads(), [])
-        journals = [p for p in (self.out / ".billcollector").rglob("*") if p.is_file()
-                    and p.name != "publication.lock"]
-        self.assertEqual(journals, [])
+        def fail_second(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("synthetic")
+            return track(*args, **kwargs)
 
-    def test_oversized_member_fails_closed(self):
-        with mock.patch.object(bcdl, "MAX_UNPACKED_BYTES", 8), self.assertRaises(ValueError):
-            self.track(_zip({"a.pdf": PDF}))
-        self.assertEqual(self.db.list_downloads(), [])
+        with mock.patch.object(bcdl, "track_download", side_effect=fail_second):
+            with self.assertRaises(OSError):
+                self.collect(["one", "two"])
+        self.assertEqual(self.db.known_source_keys(self.tid), {"data-key=one"})
+        _, listing, _ = self.collect(["one", "two"])
+        self.assertEqual(listing.clicked, ["two"])
 
+    def test_old_unkeyed_download_is_acquired_without_backfill(self):
+        options = {**self.options, "incremental": False}
+        self.collect(["one"], options=options)
+        _, listing, _ = self.collect(["one"])
+        self.assertEqual(listing.clicked, ["one"])
+        first, duplicate = self.db.list_downloads()
+        self.assertIsNone(first["source_key"])
+        self.assertEqual(duplicate["source_key"], "data-key=one")
+        self.assertEqual(duplicate["duplicate_of_id"], first["id"])
 
-class DownloadAllOptionTests(unittest.TestCase):
-    def call(self, options, keyed_save):
-        base = {"key_attribute": "href", "max_items": 5, "timeout_ms": 60000,
-                "event_window_ms": 1000}
-        locator = mock.Mock()
-        locator.evaluate_all.return_value = ["k1"]
-        return collection.download_all(mock.Mock(), mock.Mock(), locator, mock.Mock(),
-                                       {**base, **options}, completed_keys={"k1"},
-                                       keyed_save=keyed_save)
+    def test_failed_save_does_not_commit_a_key(self):
+        with mock.patch.object(bcdl, "track_download", side_effect=OSError("synthetic")):
+            with self.assertRaises(OSError):
+                self.collect(["one"])
+        self.assertEqual(self.db.known_source_keys(self.tid), set())
+        _, listing, _ = self.collect(["one"])
+        self.assertEqual(listing.clicked, ["one"])
 
-    def test_options_need_a_keyed_runner(self):
-        for options in ({"incremental": True}, {"unpack": "pdf"}):
-            with self.subTest(options), self.assertRaises(collection.CollectionError):
-                self.call(options, keyed_save=False)
+    def test_legacy_callback_stays_positional_and_opt_in_fails_before_click(self):
+        for incremental in (None, False, True):
+            page, context = _Page(), _Events()
+            listing = _Listing(page, context, [{"data-key": "one", "download": "file"}])
+            save = mock.Mock(return_value="saved")
+            options = {**self.options}
+            options.pop("incremental")
+            if incremental is not None:
+                options["incremental"] = incremental
+            with self.subTest(incremental=incremental):
+                if incremental:
+                    with self.assertRaisesRegex(collection.CollectionError, "runner"):
+                        collection.download_all(page, context, listing, save, options)
+                    self.assertEqual(listing.clicked, [])
+                    save.assert_not_called()
+                else:
+                    self.assertEqual(collection.download_all(
+                        page, context, listing, save, options), ["saved"])
+                    save.assert_called_once_with("file")
 
-    def test_option_values_are_validated(self):
-        for options in ({"incremental": "yes"}, {"unpack": "zip"}):
-            with self.subTest(options), self.assertRaises(collection.CollectionError):
-                self.call(options, keyed_save=True)
+    def test_option_is_strictly_boolean(self):
+        for options in ({"incremental": "yes"}, {"incremental": 1},
+                        {"incremental": None}):
+            with self.subTest(options=options), self.assertRaises(collection.CollectionError):
+                self.collect(["one"], options={**self.options, **options})
 
-    def test_all_known_keys_download_nothing(self):
-        self.assertEqual(self.call({"incremental": True}, keyed_save=True), [])
-
-    def test_source_key_format(self):
+    def test_source_key_preserves_value_and_attribute(self):
         self.assertEqual(collection.source_key("href", "a=b"), "href=a=b")
+        self.assertNotEqual(collection.source_key("id", "a=b"), "href=a=b")
+
+    def test_schema_accepts_only_boolean_incremental(self):
+        import jsonschema
+        import yaml
+
+        schema = yaml.safe_load((Path(__file__).resolve().parents[1] /
+                                 "apps/recipes_playwright/recipe-pw-schema.yaml").read_text())
+        method = schema["definitions"]["downloadAllMethod"]
+        for value in (True, False):
+            jsonschema.validate({"method": "download_all", "arguments": [
+                {**self.options, "incremental": value}]}, method)
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate({"method": "download_all", "arguments": [
+                {**self.options, "incremental": "yes"}]}, method)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class SourceKeyRecoveryTests(_Base):
+    def test_publication_without_row_recovers_key_from_journal(self):
+        from billcollector.interrupt import RunInterrupted
+
+        def interrupt(record):
+            raise RunInterrupted("synthetic")
+
+        with mock.patch.object(bcdl, "CONSUMERS", [interrupt]):
+            with self.assertRaises(RunInterrupted):
+                bcdl.track_download(_StubDownload(PDF, "a.pdf"), self.rid,
+                                    self.task, self.db, source_key="href=one")
+        self.db.conn.execute("DELETE FROM Download")
+        self.db.conn.commit()
+        with mock.patch.object(bcdl, "CONSUMERS", []) as consumers:
+            bcdl.recover_downloads(self.db)
+        self.assertEqual(consumers, [])
+        self.assertEqual(self.db.known_source_keys(self.tid), {"href=one"})
+        row, = self.db.list_downloads()
+        self.assertEqual(row["state"], "consumed")
+
+    def test_published_pending_delivery_retains_key_and_retries_consumer(self):
+        def unavailable(record):
+            raise OSError("synthetic")
+
+        with mock.patch.object(bcdl, "CONSUMERS", [unavailable]):
+            bcdl.track_download(_StubDownload(PDF, "a.pdf"), self.rid,
+                                self.task, self.db, source_key="href=one")
+        self.assertEqual(self.db.list_downloads()[0]["state"], "failed")
+        delivered = []
+        with mock.patch.object(bcdl, "CONSUMERS", [delivered.append]):
+            bcdl.recover_downloads(self.db)
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(self.db.known_source_keys(self.tid), {"href=one"})
+        self.assertEqual(self.db.list_downloads()[0]["state"], "consumed")

@@ -225,7 +225,7 @@ def test_empty_month_uses_existing_no_download_result(lab):
     lab.empty = True
     (files, aborted, outcome), rows = lab.run()
     assert not aborted and not rows
-    assert runner.run_result(aborted, files, outcome) == 'failure'
+    assert runner.run_result(not aborted, rows, False, outcome) == 'failure'
 
 
 def test_recipe_requires_exact_identity_before_browser(lab):

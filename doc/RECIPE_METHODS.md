@@ -136,7 +136,7 @@ Structure: the step carries either the single-phase shorthand
 submit, success}`; the last phase's `success` must equal the login
 `success`; `phases` cannot mix with top-level `steps`/`submit`).
 Preparation steps are locator chains ending in `fill`; `submit` is a
-locator chain ending in `click` or `press` (argument `key: Enter`, or
+locator chain ending in `fill` (input-triggered submission), `click` or `press` (argument `key: Enter`, or
 the positional single-argument form `"Enter"`). The non-terminal
 methods of these chains are restricted to the locator set
 (`login.py::LOCATORS`): `locator`, `get_by_role`, `get_by_text`,
@@ -224,8 +224,9 @@ Arguments: exactly one object:
 | `max_items` | integer 1..200 | yes |
 | `timeout_ms` | integer 1..600000 | yes |
 | `event_window_ms` | integer 1..10000, and < `timeout_ms` | yes |
+| `allow_empty` | boolean; default false | no |
 | `incremental` | boolean; default false; daemon only | no |
-| `unpack` | `"pdf"`; daemon only | no |
+| `unpack` | `"pdf"`; bounded ZIP transport | no |
 
 Semantics: the initial ordered key snapshot is the contract for the
 whole action; the list is re-read after every click and the selected
@@ -236,14 +237,25 @@ listing is restored after a navigating download. Persisted records stay
 committed when a later item fails. Non-graceful, single attempt, cannot
 be nested.
 
+With `allow_empty: true`, an empty listing completes with zero records and
+proves the window empty. Without it an empty list still fails closed.
 With `incremental: true`, use stable document identities, not session URLs or
 constant bulk buttons. The daemon skips committed keys for the same task and
-key attribute. A successful all-known collection yields a successful no-op run;
-a generic empty recipe/list does not. Existing keys are not revisited for
-corrections. With `unpack: pdf`, require one plain PDF member in the ZIP and
-publish its exact bytes, retaining any UTF-8 BOM. Unsafe paths/special entries,
-multiple files and size/count violations fail closed. Both options are rejected
-by the legacy batch adapter. See [bounds and storage](../README.md#incremental-document-collection).
+key attribute. A verified all-known collection succeeds with outcome
+`duplicates_only`. Existing keys are not revisited for corrections.
+`incremental` requires daemon keyed persistence.
+
+With `unpack: pdf`, the collection validates one bounded regular PDF member and
+publishes its unchanged bytes. The transport limit is 32 MiB and the PDF limit
+is 64 MiB. Safe nested member paths are flattened. Default ZIP downloads are
+unchanged. See the [ZIP transport contract](RECIPE_AUTHORING.md#pagination-empty-lists-and-downloads).
+The direct tracker unpack argument remains a separate legacy fork API with its
+existing 100 MiB bound and plain-name/BOM compatibility; collection actions use
+the upstream transport contract.
+
+The fork also accepts an original PDF with a UTF-8 BOM in ZIP transport.
+The BOM is retained in the published bytes and checksum. Member basename
+length is checked in filesystem bytes before publication.
 
 ### Fixed catalog adapter (fork)
 

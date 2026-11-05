@@ -295,7 +295,7 @@ def test_explicit_empty_retains_native_empty_run_result(browser_ctx):
     ctx.page.reload()
     runner._execute_step(ctx, recipe()['services'][0]['steps'][-1])
     assert ctx.files_downloaded == []
-    assert runner.run_result(False, ctx.files_downloaded) == 'failure'
+    assert runner.run_result(True, [], False) == 'failure'
     state['empty'] = False
     ctx.page.reload()
     with pytest.raises(runner.StepAbortError):

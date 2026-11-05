@@ -30,6 +30,7 @@ from billcollector.runner import (  # noqa: E402
     StepAbortError,
     _execute_step_with_pause,
     _handle_download_with_pause,
+    derive_outcome,
     run_result,
     step_attempts,
     transform_step_to_json,
@@ -46,27 +47,56 @@ class RetryDecisionTests(unittest.TestCase):
 
 
 class RunResultTests(unittest.TestCase):
-    def test_aborted_run_is_failure(self):
-        self.assertEqual(run_result(True, [{"result": "success"}]), "failure")
+    """C4: the five collection outcomes and their result mapping (pure)."""
 
-    def test_completed_run_without_downloads_is_failure(self):
-        # Legacy success contract: success needs at least one download.
-        self.assertEqual(run_result(False, []), "failure")
+    def test_aborted_run_with_rows_is_partial(self):
+        self.assertEqual(derive_outcome(False, [{"duplicate_of_id": None}], False),
+                         "partial")
 
-    def test_run_with_a_failed_download_is_failure(self):
-        files = [{"result": "success"},
-                 {"result": "failure: download error boom"}]
-        self.assertEqual(run_result(False, files), "failure")
+    def test_aborted_run_without_rows_is_failed(self):
+        self.assertEqual(derive_outcome(False, [], True), "failed")
 
-    def test_completed_run_with_successful_downloads_is_success(self):
-        files = [{"result": "success"}, {"result": "success"}]
-        self.assertEqual(run_result(False, files), "success")
+    def test_completed_run_with_a_new_row_is_new_documents(self):
+        rows = [{"duplicate_of_id": None}, {"duplicate_of_id": 7}]
+        self.assertEqual(derive_outcome(True, rows, False), "new_documents")
+
+    def test_completed_run_with_only_duplicate_rows_is_duplicates_only(self):
+        rows = [{"duplicate_of_id": 3}, {"duplicate_of_id": 4}]
+        self.assertEqual(derive_outcome(True, rows, False), "duplicates_only")
+
+    def test_completed_run_with_empty_proof_is_proved_empty(self):
+        self.assertEqual(derive_outcome(True, [], True), "proved_empty")
+
+    def test_completed_run_without_rows_or_proof_is_failed(self):
+        self.assertEqual(derive_outcome(True, [], False), "failed")
+
+    def test_new_documents_maps_to_success(self):
+        self.assertEqual(run_result(True, [{"duplicate_of_id": None}], False),
+                         "success")
+
+    def test_duplicates_only_maps_to_success(self):
+        self.assertEqual(run_result(True, [{"duplicate_of_id": 3}], False),
+                         "success")
+
+    def test_proved_empty_maps_to_success(self):
+        self.assertEqual(run_result(True, [], True), "success")
+
+    def test_completed_run_without_rows_or_proof_is_failure(self):
+        self.assertEqual(run_result(True, [], False), "failure")
+
+    def test_aborted_run_with_rows_is_failure(self):
+        self.assertEqual(run_result(False, [{"duplicate_of_id": None}], False),
+                         "failure")
+
+    def test_aborted_run_without_rows_is_failure(self):
+        self.assertEqual(run_result(False, [], True), "failure")
 
     def test_pause_outcome_cancel_is_cancelled(self):
-        self.assertEqual(run_result(True, [], "cancel"), "cancelled")
+        self.assertEqual(run_result(False, [{"duplicate_of_id": None}], True,
+                                    "cancel"), "cancelled")
 
     def test_pause_outcome_timeout_is_needs_attention(self):
-        self.assertEqual(run_result(True, [{"result": "success"}], "timeout"),
+        self.assertEqual(run_result(True, [], True, "timeout"),
                          "needs_attention")
 
 
@@ -258,6 +288,25 @@ class _FakeContext:
         pass
 
 
+class _EmptyListingLocator:
+    """A locator whose key listing is empty (the C4 allow_empty proof)."""
+
+    def evaluate_all(self, _script, _attribute):
+        return []
+
+
+class _EmptyListingPage(_FakePage):
+    def locator(self, selector):
+        if selector != ".rows":
+            raise AssertionError(selector)
+        return _EmptyListingLocator()
+
+
+class _EmptyListingContext(_FakeContext):
+    def __init__(self):
+        self._page = _EmptyListingPage()
+
+
 class _FakePlaywrightManager:
     """Stand-in for ``sync_playwright()``: the real ``_launch_browser`` runs
     (profile setup included), only the browser factory is faked."""
@@ -397,6 +446,35 @@ class RunTaskOutcomeTests(unittest.TestCase):
         self.assertFalse(history.exists())
         self.assertEqual(self.db.get_task(self.task_id)["status"], "idle")
 
+    def test_aborted_run_with_a_committed_row_finalizes_partial(self):
+        # A download row committed on the run's run_id (inserted directly;
+        # the launch failure aborts the run before the step loop) makes the
+        # collection outcome partial and the result failure (C4, issue #24).
+        self.db.insert_download(run_id=1, task_id=self.task_id,
+                                url="http://127.0.0.1:8787/doc.pdf",
+                                filename="doc.pdf", size=100,
+                                sha256="0" * 64,
+                                saved_path=str(self.tmp / "downloads" / "doc.pdf"))
+        with mock.patch.object(runner, "load_recipe",
+                               return_value=(True, None, None, self.RECIPE)), \
+                mock.patch.object(runner, "_vault_preflight",
+                                  return_value={"user": "u1",
+                                                "password": "p",
+                                                "otp": "o"}), \
+                mock.patch.object(runner, "sync_playwright",
+                                  return_value=_FakePlaywrightManager()), \
+                mock.patch.object(runner, "_launch_browser",
+                                  side_effect=RuntimeError("launch failed")), \
+                mock.patch.object(display, "start_display_stack",
+                                  return_value=[]):
+            exit_code = runner.run_task(self.task_id)
+        self.assertEqual(exit_code, 1)
+        run = self.db.get_run(1)
+        self.assertEqual(run["result"], "failure")
+        self.assertEqual(run["collection_outcome"], "partial")
+        self.assertIsNotNone(run["date_from"])
+        self.assertEqual(self.db.get_task(self.task_id)["status"], "idle")
+
 
 class RunInterruptedTests(unittest.TestCase):
     """C7.5: a shutdown signal (SIGTERM from the daemon, Ctrl+C standalone)
@@ -488,6 +566,37 @@ class RunInterruptedTests(unittest.TestCase):
             with self.assertRaises(runner.RunInterrupted):
                 os.kill(os.getpid(), signum)
 
+    def test_sigterm_after_run_commit_before_return_finalizes_row(self):
+        create = Database.create_run
+
+        def commit_then_signal(database, *args, **kwargs):
+            run_id = create(database, *args, **kwargs)
+            os.kill(os.getpid(), signal.SIGTERM)
+            return run_id
+
+        with mock.patch.object(Database, "create_run", commit_then_signal):
+            self.assertEqual(self._run_task(), 1)
+        run = self.db.get_run(1)
+        self.assertEqual(run["result"], "interrupted")
+        self.assertEqual(run["collection_outcome"], "failed")
+        self.assertIsNotNone(run["ended_at"])
+        self.assertEqual(self.db.get_task(self.task_id)["status"], "idle")
+        self.assertFalse((config.DISPLAY_DIR / ":99.lock").exists())
+
+    def test_sigterm_after_running_status_finalizes_row(self):
+        update = Database.set_task_status
+
+        def update_then_signal(database, task_id, status):
+            result = update(database, task_id, status)
+            if status == "running":
+                os.kill(os.getpid(), signal.SIGTERM)
+            return result
+
+        with mock.patch.object(Database, "set_task_status", update_then_signal):
+            self.assertEqual(self._run_task(), 1)
+        self.assertEqual(self.db.get_run(1)["result"], "interrupted")
+        self.assertEqual(self.db.get_task(self.task_id)["status"], "idle")
+
     def test_sigterm_during_the_run_ends_interrupted(self):
         # The step fails 3x instantly and the run then blocks in the pause
         # loop; the deadline is long enough that only the signal ends it.
@@ -510,6 +619,41 @@ class RunInterruptedTests(unittest.TestCase):
         self.assertFalse((config.DISPLAY_DIR / ":99.lock").exists())
         self.assertFalse(pause.control_sock_path(1).exists())
 
+    def test_sigterm_with_a_committed_row_ends_interrupted_partial(self):
+        # A download row committed on the run's run_id before the signal
+        # makes the collection outcome partial while the result stays
+        # interrupted (C4, issue #24): the finalization re-lists the
+        # run's committed rows.
+        self.db.set_setting("pause_deadline_seconds", "30")
+
+        def insert_row_then_term():
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                if self.db.list_runs(self.task_id):
+                    self.db.insert_download(run_id=1, task_id=self.task_id,
+                                            url="http://127.0.0.1:8787/doc.pdf",
+                                            filename="doc.pdf", size=100,
+                                            sha256="0" * 64,
+                                            saved_path=str(self.tmp
+                                                           / "downloads"
+                                                           / "doc.pdf"))
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    return
+                time.sleep(0.02)
+
+        thread = threading.Thread(target=insert_row_then_term)
+        thread.start()
+        try:
+            exit_code = self._run_task()
+        finally:
+            thread.join(timeout=30)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(exit_code, 1)
+        run = self.db.get_run(1)
+        self.assertEqual(run["result"], "interrupted")
+        self.assertEqual(run["collection_outcome"], "partial")
+        self.assertIsNotNone(run["date_from"])
+
 
 class _LaunchDisplayManager:
     """Like _FakePlaywrightManager, but also captures the DISPLAY env var at
@@ -527,6 +671,17 @@ class _LaunchDisplayManager:
 
     def __exit__(self, *exc):
         return False
+
+
+class _EmptyListingManager(_LaunchDisplayManager):
+    """A launch manager whose browser context answers an empty key listing
+    (the C4 allow_empty proof)."""
+
+    def __enter__(self):
+        playwright = super().__enter__()
+        playwright.chromium.launch_persistent_context.return_value = \
+            _EmptyListingContext()
+        return playwright
 
 
 class DisplayLifecycleTests(unittest.TestCase):
@@ -598,6 +753,33 @@ class DisplayLifecycleTests(unittest.TestCase):
         self.addCleanup(
             lambda: child.kill() if child.poll() is None else None)
         return child
+
+    def test_incremental_all_known_finishes_run_successfully(self):
+        self.db.insert_download(None, self.task_id, "https://fixture.invalid/one",
+                                "one.pdf", 1, "synthetic", "unused",
+                                source_key="id=one")
+
+        def collect(ctx, recipe):
+            locator = mock.Mock()
+            locator.evaluate_all.return_value = ["one"]
+            runner._collection_actions(ctx)["download_all"](locator, {
+                "key_attribute": "id", "max_items": 5,
+                "timeout_ms": 100, "event_window_ms": 5,
+                "incremental": True,
+            })
+            locator.nth.assert_not_called()
+            return ctx.files_downloaded, False, None
+
+        with mock.patch.object(display, "start_display_stack", return_value=[]), \
+                mock.patch.object(runner, "_run_recipe", side_effect=collect), \
+                self.assertLogs(runner.logger, level="INFO") as logs:
+            exit_code = self._run_task()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(self.db.get_run(1)["result"], "success")
+        self.assertEqual(self.db.get_run(1)["collection_outcome"],
+                         "duplicates_only")
+        self.assertIn("all items known", " ".join(logs.output))
+        self.assertEqual(len(self.db.list_downloads()), 1)
 
     def test_run_task_records_the_display_on_the_run_row(self):
         with mock.patch.object(display, "start_display_stack",
@@ -684,6 +866,102 @@ class DisplayLifecycleTests(unittest.TestCase):
             self._run_task()
         write.assert_not_called()
         start.assert_called_once_with(99, rfb_auth_file=None)
+
+    def test_completed_run_without_downloads_finalizes_failed(self):
+        # The goto recipe completes without downloading anything and without
+        # an empty proof: the run ends failure with outcome failed, and the
+        # row records the collection outcome and the window start (C4,
+        # issue #24).
+        with mock.patch.object(display, "start_display_stack",
+                               return_value=[]):
+            exit_code = self._run_task()
+        self.assertEqual(exit_code, 1)
+        run = self.db.get_run(1)
+        self.assertEqual(run["result"], "failure")
+        self.assertEqual(run["collection_outcome"], "failed")
+        expected_from = runner.DateContext.capture(
+            self.db.get_task(self.task_id)["date_window_days"], None
+        ).date_from.isoformat()
+        self.assertEqual(run["date_from"], expected_from)
+        self.assertEqual(self.db.get_task(self.task_id)["status"], "idle")
+
+    def _run_task_empty_listing(self, options):
+        # A download_all step against the empty-listing fake context; the
+        # options dict is supplied by the test (C4, issue #24).
+        recipe = {
+            "services": [{
+                "serviceName": "svc",
+                "steps": [
+                    {"step": 1, "description": "Download all invoices",
+                     "methods": [
+                         {"method": "locator",
+                          "arguments": [{"selector": ".rows"}]},
+                         {"method": "download_all",
+                          "arguments": [options]},
+                     ]},
+                ],
+            }]
+        }
+        with mock.patch.object(runner, "load_recipe",
+                               return_value=(True, None, None, recipe)), \
+                mock.patch.object(runner, "_vault_preflight",
+                                  return_value={"user": "u1",
+                                                "password": "p",
+                                                "otp": "o"}), \
+                mock.patch.object(runner, "sync_playwright",
+                                  return_value=_EmptyListingManager()), \
+                mock.patch.object(display, "start_display_stack",
+                                  return_value=[]):
+            return runner.run_task(self.task_id)
+
+    def test_completed_empty_listing_with_allow_empty_proves_empty(self):
+        # C4 (issue #24): a download_all that completes on an empty listing
+        # under allow_empty is the run's empty proof - the run ends success
+        # with outcome proved_empty.
+        exit_code = self._run_task_empty_listing({
+            "key_attribute": "data-key", "max_items": 5,
+            "timeout_ms": 500, "event_window_ms": 30,
+            "allow_empty": True,
+        })
+        self.assertEqual(exit_code, 0)
+        run = self.db.get_run(1)
+        self.assertEqual(run["result"], "success")
+        self.assertEqual(run["collection_outcome"], "proved_empty")
+        self.assertIsNotNone(run["date_from"])
+        self.assertEqual(self.db.list_downloads(run_id=1), [])
+        self.assertEqual(self.db.get_task(self.task_id)["status"], "idle")
+
+    def test_empty_listing_without_allow_empty_proves_nothing(self):
+        # C4 (issue #24): the same recipe without allow_empty - download_all
+        # fails closed on the empty listing. The run pauses (C5.6, bounded by
+        # the pause deadline) and cancels; the raised action counts as ran,
+        # never proven, so the outcome stays failed, not proved_empty.
+        self.db.set_setting("pause_deadline_seconds", "20")
+
+        def cancel_when_paused():
+            sock_path = pause.control_sock_path(1)
+            deadline = time.time() + 25
+            while not sock_path.exists():
+                if time.time() > deadline:
+                    return
+                time.sleep(0.02)
+            ControlClient(sock_path).request("cancel")
+
+        thread = threading.Thread(target=cancel_when_paused)
+        thread.start()
+        try:
+            exit_code = self._run_task_empty_listing({
+                "key_attribute": "data-key", "max_items": 5,
+                "timeout_ms": 500, "event_window_ms": 30,
+            })
+        finally:
+            thread.join(timeout=30)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(exit_code, 1)
+        run = self.db.get_run(1)
+        self.assertEqual(run["result"], "cancelled")
+        self.assertEqual(run["collection_outcome"], "failed")
+        self.assertEqual(self.db.get_task(self.task_id)["status"], "idle")
 
 
 class _UntilLocator:
