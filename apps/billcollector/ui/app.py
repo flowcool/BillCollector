@@ -88,7 +88,7 @@ nicegui_app.config.vue_config_script += (
 # ``environ['REQUEST_METHOD']`` unconditionally: the unhandled ``KeyError``
 # unwinds through the whole middleware stack (including the auth
 # BaseHTTPMiddleware) and is logged as a 500 "Exception in ASGI
-# application" although no client is left to answer. python-engineio 4.15.0
+# application" although no client is left to answer. python-engineio 4.15.1
 # still ships this, so the workaround is a wrapper, not a pin.
 #
 # The wrapper must *send a response* on that path: the mount sits below

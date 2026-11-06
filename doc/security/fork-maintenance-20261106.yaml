@@ -21,7 +21,7 @@ acceptance_before_publication:
   static_checks: Ruff 0.17.3, Bandit 1.9.4 high severity, compileall, bash syntax,
     uv pip check and Docker-context checks pass.
   schema_sha256: d36f7a584e6b153ab54c7971e650491a94574ac6926a79aa5919f6695338bff3
-  application_code_or_schema_delta: false
+  application_behavior_or_schema_delta: false
   database_migration_delta: false
   real_vault_provider_or_archive_qualification: false
   image_runtime_receipt: Record the final candidate and published digest receipts
