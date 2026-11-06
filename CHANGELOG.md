@@ -27,6 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Qualify NiceGUI 3.19.0, anyio 4.16.0, pyee 14.0.0 and current Socket.IO,
+  multipart and async-test patch releases. The image and CI use Python 3.12,
+  which satisfies pyee 14. Keep the Playwright upper bound below pyee 15.
+  Refresh CodeQL to 4.39.2 and its pinned Pullfrog action.
+
 - Update seven Python patch pins and GitHub action commits. Exclude pyee >=15
   from Dependabot while Playwright 1.64.1 requires pyee >=13,<15.
 
