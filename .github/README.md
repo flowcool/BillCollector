@@ -4,6 +4,9 @@ Dependabot groups weekly Python and GitHub Actions updates. Security alerts and
 security-update pull requests are enabled in repository settings. Merges remain
 manual; merging a validated dependency update publishes a commit-tagged image.
 
+Playwright 1.64.1 requires `pyee>=13,<15`. Dependabot excludes `pyee>=15`
+until the Playwright dependency bound changes. The runtime keeps an exact pin.
+
 The Playwright assurance workflow runs on pull requests, maintained-branch pushes,
 release tags, manual dispatch and a weekly schedule. It checks unit tests, a
 synthetic Chromium page, dependency consistency, undefined Python names, known
