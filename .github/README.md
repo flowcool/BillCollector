@@ -6,6 +6,8 @@ manual; merging a validated dependency update publishes a commit-tagged image.
 
 Playwright 1.64.1 requires `pyee>=13,<15`. Dependabot excludes `pyee>=15`
 until the Playwright dependency bound changes. The runtime keeps an exact pin.
+The qualified `pyee==14.0.0` pin requires Python 3.12 or newer. The Docker
+image and assurance workflow both use Python 3.12.
 
 The Playwright assurance workflow runs on pull requests, maintained-branch pushes,
 release tags, manual dispatch and a weekly schedule. It checks unit tests, a
