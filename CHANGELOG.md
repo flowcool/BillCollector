@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Refresh the Ubuntu 24.04 base digest and explicitly update libpcre2-8-0
+  during image builds to resolve seven PCRE vulnerabilities.
+
 - Refresh APT and its runtime library during image builds so the pinned base
   receives the available package security updates.
 
@@ -23,6 +26,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fresh OTP resolution and verification-only resume.
 
 ### Changed
+
+- Update seven Python patch pins and GitHub action commits. Exclude pyee >=15
+  from Dependabot while Playwright 1.64.1 requires pyee >=13,<15.
 
 - Refresh runtime and test dependency pins, including Playwright 1.64.1.
   Keep pyee 13.0.1 within Playwright's required >=13,<15 range so the

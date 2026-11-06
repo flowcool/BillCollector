@@ -1,0 +1,970 @@
+observed: '2026-11-06'
+owner: infra-x4bxf
+scope: Synthetic engine maintenance snapshot; no provider or production qualification.
+source:
+  fork_base: 82e79e6ae68ced63ac6f34064d1101a4ffae4344
+  public_upstream: 2209e3ee84a7897b74f0ce2812d43929266ecce9
+  recent_content_sync: https://github.com/flowcool/BillCollector/pull/95
+  history_ahead_behind_before_maintenance:
+  - 159
+  - 47
+  comparison: git diff upstream/main origin/playwright-next; AST comparison of 26
+    changed common application Python files
+  missing_upstream_function_definitions: 0
+  comparison_limit: Definition presence does not prove semantic equivalence. Preserve
+    fork contracts and use synthetic acceptance.
+  history_treatment: Preserve published history. The sanitized upstream mirror and
+    content ports make ancestry counts insufficient for content drift.
+acceptance_before_publication:
+  full_suite: 990 passed, 5 skipped, 151 subtests passed; exact updated Python pins,
+    isolated state and synthetic browsers.
+  static_checks: Ruff 0.17.3, Bandit 1.9.4 high severity, compileall, bash syntax,
+    uv pip check and Docker-context checks pass.
+  schema_sha256: d36f7a584e6b153ab54c7971e650491a94574ac6926a79aa5919f6695338bff3
+  application_behavior_or_schema_delta: false
+  database_migration_delta: false
+  real_vault_provider_or_archive_qualification: false
+  image_runtime_receipt: Record the final candidate and published digest receipts
+    in infra-x4bxf; do not infer them from this scan snapshot.
+dependency_compatibility:
+  playwright: 1.64.1
+  pyee_requirement_from_distribution: '>=13,<15'
+  pyee_pin: 13.0.1
+  dependabot_exclusion: '>=15'
+  ubuntu_digest: sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+older_proposal_review:
+  '49':
+    head: edfc3a82fc6ec45f491f79db31bc7f51d23cf5a1
+    decision: Withdraw old proposal; preserve branch and proof. Do not claim delivery.
+    reason: Packaged-schema selection conflicts with current explicit mounted-schema
+      promotion. Broad stale changes require a new installation requirement before
+      porting.
+    not_shipped:
+    - Optional Compose overlays and container-daemon.md guide
+    - BC_RECIPE_DIR, BC_IMPORT_INI and daemon BC_UI_PORT aliases
+    - Early environment path loading and extended startup configuration validation
+    selected_contract: doc/INFRA_RUNTIME_CONTRACT.md
+    retained_proof_owner: infra-g9t1
+    reuse_condition: A fresh-install requirement and an agreed schema/configuration
+      contract; port only missing behavior onto the then-current engine.
+  '64':
+    head: 9b2ecb35f0ade0267605bb9fb6a221920fc48b68
+    decision: Superseded by integrated notice identity and later fixes.
+    integration: https://github.com/flowcool/BillCollector/pull/81
+    original_named_tests_retained: 12
+    additional_named_tests: 3
+    later_behavior: Iterative PDF graph traversal, publication journal, explicit provider
+      policy and current C3 validation.
+    separate_archive_contract: https://github.com/s-t-e-f-a-n/BillCollector/issues/52
+scanner:
+  name: Trivy
+  version: 0.70.0
+  image_digest: sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
+  db_metadata:
+    Version: 2
+    NextUpdate: '2026-11-07T09:50:00.021602794Z'
+    UpdatedAt: '2026-11-06T09:50:00.021603275Z'
+    DownloadedAt: '2026-11-06T13:23:30.186694388Z'
+  image_id: sha256:edd55a724ffe089a012b9793575076d132c38a24929573c17bd7eb69cd9c6af9
+  image_labels:
+    org.opencontainers.image.description: Collect documents from web portals using
+      Playwright recipes
+    org.opencontainers.image.licenses: MIT
+    org.opencontainers.image.revision: 6d0849f0daa8d67d994ed1c967bad8c2ea7f8221
+    org.opencontainers.image.source: https://github.com/flowcool/BillCollector
+    org.opencontainers.image.title: BillCollector
+    org.opencontainers.image.version: maintenance-20261106
+remediation:
+  original_open_alerts: 108
+  original_severity:
+    MEDIUM: 82
+    LOW: 26
+  action: Update Ubuntu digest and explicitly install libpcre2-8-0 with current APT
+    package indexes.
+  fixed_original_alerts:
+  - alert: 3948
+    id: CVE-2026-89160
+    package: libpcre2-8-0
+    fixed_version: 10.42-4ubuntu2.2
+  - alert: 3947
+    id: CVE-2026-89158
+    package: libpcre2-8-0
+    fixed_version: 10.42-4ubuntu2.2
+  - alert: 3946
+    id: CVE-2026-89157
+    package: libpcre2-8-0
+    fixed_version: 10.42-4ubuntu2.2
+  - alert: 3945
+    id: CVE-2026-89156
+    package: libpcre2-8-0
+    fixed_version: 10.42-4ubuntu2.2
+  - alert: 3944
+    id: CVE-2026-103111
+    package: libpcre2-8-0
+    fixed_version: 10.42-4ubuntu2.2
+  - alert: 97
+    id: CVE-2026-89161
+    package: libpcre2-8-0
+    fixed_version: 10.42-4ubuntu2.2
+  - alert: 96
+    id: CVE-2026-86145
+    package: libpcre2-8-0
+    fixed_version: 10.42-4ubuntu2.2
+  new_package_cve_pairs_since_baseline:
+  - package: libperl5.38t64
+    id: CVE-2026-82560
+  - package: perl
+    id: CVE-2026-82560
+  - package: perl-base
+    id: CVE-2026-82560
+  - package: perl-modules-5.38
+    id: CVE-2026-82560
+  remaining_severity:
+    MEDIUM: 79
+    LOW: 26
+  remaining_fixable: 0
+  risk_limit: No fixed version in this scanner database does not prove non-exploitability.
+    Remaining findings are visible, without dismissal or suppression. Reassess when
+    vendor fixes or the runtime package set changes.
+  python_audit: 'pip-audit 2.10.1: no known vulnerabilities in the exact runtime requirements.'
+remaining:
+  ubuntu|dash|CVE-2026-102473:
+    id: CVE-2026-102473
+    package: dash
+    installed: 0.5.12-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-102473
+  ubuntu|dash|CVE-2026-102474:
+    id: CVE-2026-102474
+    package: dash
+    installed: 0.5.12-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-102474
+  ubuntu|git|CVE-2024-52005:
+    id: CVE-2024-52005
+    package: git
+    installed: 1:2.43.0-1ubuntu7.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-52005
+  ubuntu|git-man|CVE-2024-52005:
+    id: CVE-2024-52005
+    package: git-man
+    installed: 1:2.43.0-1ubuntu7.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-52005
+  ubuntu|libavahi-client3|CVE-2025-59529:
+    id: CVE-2025-59529
+    package: libavahi-client3
+    installed: 0.8-13ubuntu6.2
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-59529
+  ubuntu|libavahi-client3|CVE-2024-52615:
+    id: CVE-2024-52615
+    package: libavahi-client3
+    installed: 0.8-13ubuntu6.2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-52615
+  ubuntu|libavahi-client3|CVE-2024-52616:
+    id: CVE-2024-52616
+    package: libavahi-client3
+    installed: 0.8-13ubuntu6.2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-52616
+  ubuntu|libavahi-common-data|CVE-2025-59529:
+    id: CVE-2025-59529
+    package: libavahi-common-data
+    installed: 0.8-13ubuntu6.2
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-59529
+  ubuntu|libavahi-common-data|CVE-2024-52615:
+    id: CVE-2024-52615
+    package: libavahi-common-data
+    installed: 0.8-13ubuntu6.2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-52615
+  ubuntu|libavahi-common-data|CVE-2024-52616:
+    id: CVE-2024-52616
+    package: libavahi-common-data
+    installed: 0.8-13ubuntu6.2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-52616
+  ubuntu|libavahi-common3|CVE-2025-59529:
+    id: CVE-2025-59529
+    package: libavahi-common3
+    installed: 0.8-13ubuntu6.2
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-59529
+  ubuntu|libavahi-common3|CVE-2024-52615:
+    id: CVE-2024-52615
+    package: libavahi-common3
+    installed: 0.8-13ubuntu6.2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-52615
+  ubuntu|libavahi-common3|CVE-2024-52616:
+    id: CVE-2024-52616
+    package: libavahi-common3
+    installed: 0.8-13ubuntu6.2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-52616
+  ubuntu|libc-bin|CVE-2026-18374:
+    id: CVE-2026-18374
+    package: libc-bin
+    installed: 2.39-0ubuntu8.9
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-18374
+  ubuntu|libc-bin|CVE-2026-89092:
+    id: CVE-2026-89092
+    package: libc-bin
+    installed: 2.39-0ubuntu8.9
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-89092
+  ubuntu|libc6|CVE-2026-18374:
+    id: CVE-2026-18374
+    package: libc6
+    installed: 2.39-0ubuntu8.9
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-18374
+  ubuntu|libc6|CVE-2026-89092:
+    id: CVE-2026-89092
+    package: libc6
+    installed: 2.39-0ubuntu8.9
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-89092
+  ubuntu|libcairo-gobject2|CVE-2017-7475:
+    id: CVE-2017-7475
+    package: libcairo-gobject2
+    installed: 1.18.0-3build1
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2017-7475
+  ubuntu|libcairo-gobject2|CVE-2018-18064:
+    id: CVE-2018-18064
+    package: libcairo-gobject2
+    installed: 1.18.0-3build1
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2018-18064
+  ubuntu|libcairo2|CVE-2017-7475:
+    id: CVE-2017-7475
+    package: libcairo2
+    installed: 1.18.0-3build1
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2017-7475
+  ubuntu|libcairo2|CVE-2018-18064:
+    id: CVE-2018-18064
+    package: libcairo2
+    installed: 1.18.0-3build1
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2018-18064
+  ubuntu|libdevmapper1.02.1|CVE-2026-19617:
+    id: CVE-2026-19617
+    package: libdevmapper1.02.1
+    installed: 2:1.02.185-3ubuntu3.2
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-19617
+  ubuntu|libelf1t64|CVE-2025-1352:
+    id: CVE-2025-1352
+    package: libelf1t64
+    installed: 0.190-1.1ubuntu0.1
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-1352
+  ubuntu|libelf1t64|CVE-2025-1376:
+    id: CVE-2025-1376
+    package: libelf1t64
+    installed: 0.190-1.1ubuntu0.1
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-1376
+  ubuntu|libexpat1|CVE-2025-66382:
+    id: CVE-2025-66382
+    package: libexpat1
+    installed: 2.6.1-2ubuntu0.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-66382
+  ubuntu|libglib2.0-0t64|CVE-2026-86469:
+    id: CVE-2026-86469
+    package: libglib2.0-0t64
+    installed: 2.80.0-6ubuntu3.10
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-86469
+  ubuntu|libgnutls30t64|CVE-2026-67693:
+    id: CVE-2026-67693
+    package: libgnutls30t64
+    installed: 3.8.3-1.1ubuntu3.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-67693
+  ubuntu|libgnutls30t64|CVE-2026-88647:
+    id: CVE-2026-88647
+    package: libgnutls30t64
+    installed: 3.8.3-1.1ubuntu3.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-88647
+  ubuntu|libgnutls30t64|CVE-2026-88648:
+    id: CVE-2026-88648
+    package: libgnutls30t64
+    installed: 3.8.3-1.1ubuntu3.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-88648
+  ubuntu|libgnutls30t64|CVE-2026-95184:
+    id: CVE-2026-95184
+    package: libgnutls30t64
+    installed: 3.8.3-1.1ubuntu3.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-95184
+  ubuntu|libgnutls30t64|CVE-2026-95210:
+    id: CVE-2026-95210
+    package: libgnutls30t64
+    installed: 3.8.3-1.1ubuntu3.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-95210
+  ubuntu|libharfbuzz0b|CVE-2026-22693:
+    id: CVE-2026-22693
+    package: libharfbuzz0b
+    installed: 8.3.0-2build2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-22693
+  ubuntu|libicu74|CVE-2025-5222:
+    id: CVE-2025-5222
+    package: libicu74
+    installed: 74.2-1ubuntu3.1
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-5222
+  ubuntu|libnode109|CVE-2024-22018:
+    id: CVE-2024-22018
+    package: libnode109
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-22018
+  ubuntu|libnode109|CVE-2024-22020:
+    id: CVE-2024-22020
+    package: libnode109
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-22020
+  ubuntu|libnode109|CVE-2024-27982:
+    id: CVE-2024-27982
+    package: libnode109
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-27982
+  ubuntu|libnode109|CVE-2024-27983:
+    id: CVE-2024-27983
+    package: libnode109
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-27983
+  ubuntu|libnode109|CVE-2025-23085:
+    id: CVE-2025-23085
+    package: libnode109
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-23085
+  ubuntu|libnode109|CVE-2025-23166:
+    id: CVE-2025-23166
+    package: libnode109
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-23166
+  ubuntu|libnode109|CVE-2026-48930:
+    id: CVE-2026-48930
+    package: libnode109
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-48930
+  ubuntu|libopenjp2-7|CVE-2023-39328:
+    id: CVE-2023-39328
+    package: libopenjp2-7
+    installed: 2.5.0-2ubuntu0.5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2023-39328
+  ubuntu|libopenjp2-7|CVE-2023-39329:
+    id: CVE-2023-39329
+    package: libopenjp2-7
+    installed: 2.5.0-2ubuntu0.5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2023-39329
+  ubuntu|libopenjp2-7|CVE-2019-6988:
+    id: CVE-2019-6988
+    package: libopenjp2-7
+    installed: 2.5.0-2ubuntu0.5
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2019-6988
+  ubuntu|libpam-systemd|CVE-2026-40228:
+    id: CVE-2026-40228
+    package: libpam-systemd
+    installed: 255.4-1ubuntu8.18
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-40228
+  ubuntu|libperl5.38t64|CVE-2026-82560:
+    id: CVE-2026-82560
+    package: libperl5.38t64
+    installed: 5.38.2-3.2ubuntu0.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-82560
+  ubuntu|libpixman-1-0|CVE-2023-37769:
+    id: CVE-2023-37769
+    package: libpixman-1-0
+    installed: 0.42.2-1build1
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2023-37769
+  ubuntu|libsasl2-2|CVE-2026-107161:
+    id: CVE-2026-107161
+    package: libsasl2-2
+    installed: 2.1.28+dfsg1-5ubuntu3.1
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-107161
+  ubuntu|libsasl2-modules-db|CVE-2026-107161:
+    id: CVE-2026-107161
+    package: libsasl2-modules-db
+    installed: 2.1.28+dfsg1-5ubuntu3.1
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-107161
+  ubuntu|libsystemd-shared|CVE-2026-40228:
+    id: CVE-2026-40228
+    package: libsystemd-shared
+    installed: 255.4-1ubuntu8.18
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-40228
+  ubuntu|libsystemd0|CVE-2026-40228:
+    id: CVE-2026-40228
+    package: libsystemd0
+    installed: 255.4-1ubuntu8.18
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-40228
+  ubuntu|libudev1|CVE-2026-40228:
+    id: CVE-2026-40228
+    package: libudev1
+    installed: 255.4-1ubuntu8.18
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-40228
+  ubuntu|libxrender1|CVE-2026-88807:
+    id: CVE-2026-88807
+    package: libxrender1
+    installed: 1:0.9.10-1.1build1
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-88807
+  ubuntu|login|CVE-2024-56433:
+    id: CVE-2024-56433
+    package: login
+    installed: 1:4.13+dfsg1-4ubuntu3.2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-56433
+  ubuntu|nodejs|CVE-2024-22018:
+    id: CVE-2024-22018
+    package: nodejs
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-22018
+  ubuntu|nodejs|CVE-2024-22020:
+    id: CVE-2024-22020
+    package: nodejs
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-22020
+  ubuntu|nodejs|CVE-2024-27982:
+    id: CVE-2024-27982
+    package: nodejs
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-27982
+  ubuntu|nodejs|CVE-2024-27983:
+    id: CVE-2024-27983
+    package: nodejs
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-27983
+  ubuntu|nodejs|CVE-2025-23085:
+    id: CVE-2025-23085
+    package: nodejs
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-23085
+  ubuntu|nodejs|CVE-2025-23166:
+    id: CVE-2025-23166
+    package: nodejs
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2025-23166
+  ubuntu|nodejs|CVE-2026-48930:
+    id: CVE-2026-48930
+    package: nodejs
+    installed: 18.19.1+dfsg-6ubuntu5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-48930
+  ubuntu|passwd|CVE-2024-56433:
+    id: CVE-2024-56433
+    package: passwd
+    installed: 1:4.13+dfsg1-4ubuntu3.2
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2024-56433
+  ubuntu|perl|CVE-2026-82560:
+    id: CVE-2026-82560
+    package: perl
+    installed: 5.38.2-3.2ubuntu0.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-82560
+  ubuntu|perl-base|CVE-2026-82560:
+    id: CVE-2026-82560
+    package: perl-base
+    installed: 5.38.2-3.2ubuntu0.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-82560
+  ubuntu|perl-modules-5.38|CVE-2026-82560:
+    id: CVE-2026-82560
+    package: perl-modules-5.38
+    installed: 5.38.2-3.2ubuntu0.6
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-82560
+  ubuntu|python3-jwcrypto|CVE-2023-6681:
+    id: CVE-2023-6681
+    package: python3-jwcrypto
+    installed: 1.5.4-1
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2023-6681
+  ubuntu|python3-pil|CVE-2026-112390:
+    id: CVE-2026-112390
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112390
+  ubuntu|python3-pil|CVE-2026-112391:
+    id: CVE-2026-112391
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112391
+  ubuntu|python3-pil|CVE-2026-112392:
+    id: CVE-2026-112392
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112392
+  ubuntu|python3-pil|CVE-2026-112393:
+    id: CVE-2026-112393
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112393
+  ubuntu|python3-pil|CVE-2026-112394:
+    id: CVE-2026-112394
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112394
+  ubuntu|python3-pil|CVE-2026-112395:
+    id: CVE-2026-112395
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112395
+  ubuntu|python3-pil|CVE-2026-112397:
+    id: CVE-2026-112397
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112397
+  ubuntu|python3-pil|CVE-2026-112398:
+    id: CVE-2026-112398
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112398
+  ubuntu|python3-pil|CVE-2026-112399:
+    id: CVE-2026-112399
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112399
+  ubuntu|python3-pil|CVE-2026-112400:
+    id: CVE-2026-112400
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112400
+  ubuntu|python3-pil|CVE-2026-112401:
+    id: CVE-2026-112401
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112401
+  ubuntu|python3-pil|CVE-2026-112402:
+    id: CVE-2026-112402
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112402
+  ubuntu|python3-pil|CVE-2026-112403:
+    id: CVE-2026-112403
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112403
+  ubuntu|python3-pil|CVE-2026-112404:
+    id: CVE-2026-112404
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112404
+  ubuntu|python3-pil|CVE-2026-112406:
+    id: CVE-2026-112406
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112406
+  ubuntu|python3-pil|CVE-2026-112891:
+    id: CVE-2026-112891
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112891
+  ubuntu|python3-pil|CVE-2026-112892:
+    id: CVE-2026-112892
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112892
+  ubuntu|python3-pil|CVE-2026-112893:
+    id: CVE-2026-112893
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112893
+  ubuntu|python3-pil|CVE-2026-112894:
+    id: CVE-2026-112894
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112894
+  ubuntu|python3-pil|CVE-2026-112895:
+    id: CVE-2026-112895
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112895
+  ubuntu|python3-pil|CVE-2026-112896:
+    id: CVE-2026-112896
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112896
+  ubuntu|python3-pil|CVE-2026-112897:
+    id: CVE-2026-112897
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112897
+  ubuntu|python3-pil|CVE-2026-112898:
+    id: CVE-2026-112898
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112898
+  ubuntu|python3-pil|CVE-2026-112900:
+    id: CVE-2026-112900
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112900
+  ubuntu|python3-pil|CVE-2026-112901:
+    id: CVE-2026-112901
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-112901
+  ubuntu|python3-pil|CVE-2026-96636:
+    id: CVE-2026-96636
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-96636
+  ubuntu|python3-pil|CVE-2026-96637:
+    id: CVE-2026-96637
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-96637
+  ubuntu|python3-pil|CVE-2026-96638:
+    id: CVE-2026-96638
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-96638
+  ubuntu|python3-pil|CVE-2026-96640:
+    id: CVE-2026-96640
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-96640
+  ubuntu|python3-pil|CVE-2026-96641:
+    id: CVE-2026-96641
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-96641
+  ubuntu|python3-pil|CVE-2026-96642:
+    id: CVE-2026-96642
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-96642
+  ubuntu|python3-pil|CVE-2026-96778:
+    id: CVE-2026-96778
+    package: python3-pil
+    installed: 10.2.0-1ubuntu1.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-96778
+  ubuntu|systemd|CVE-2026-40228:
+    id: CVE-2026-40228
+    package: systemd
+    installed: 255.4-1ubuntu8.18
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-40228
+  ubuntu|systemd-dev|CVE-2026-40228:
+    id: CVE-2026-40228
+    package: systemd-dev
+    installed: 255.4-1ubuntu8.18
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-40228
+  ubuntu|systemd-sysv|CVE-2026-40228:
+    id: CVE-2026-40228
+    package: systemd-sysv
+    installed: 255.4-1ubuntu8.18
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-40228
+  ubuntu|tar|CVE-2026-18477:
+    id: CVE-2026-18477
+    package: tar
+    installed: 1.35+dfsg-3ubuntu0.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-18477
+  ubuntu|tar|CVE-2026-18508:
+    id: CVE-2026-18508
+    package: tar
+    installed: 1.35+dfsg-3ubuntu0.4
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2026-18508
+  ubuntu|wget|CVE-2021-31879:
+    id: CVE-2021-31879
+    package: wget
+    installed: 1.21.4-1ubuntu4.5
+    severity: MEDIUM
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2021-31879
+  ubuntu|xserver-common|CVE-2023-5574:
+    id: CVE-2023-5574
+    package: xserver-common
+    installed: 2:21.1.12-1ubuntu1.9
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2023-5574
+  ubuntu|xvfb|CVE-2023-5574:
+    id: CVE-2023-5574
+    package: xvfb
+    installed: 2:21.1.12-1ubuntu1.9
+    severity: LOW
+    fixed_version: null
+    treatment: monitor_vendor_no_fixed_version
+    source: https://avd.aquasec.com/nvd/cve-2023-5574
