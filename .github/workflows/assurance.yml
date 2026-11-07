@@ -58,6 +58,8 @@ jobs:
           PYTHON
 
   validate:
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
     name: Unit and browser tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -111,6 +113,8 @@ jobs:
           PYTHON
 
   python-security:
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
     name: Python security
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -121,6 +125,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/requirements-security.txt
       - run: python -m pip install -r .github/requirements-security.txt
       - name: Audit all pinned runtime dependencies
         run: pip-audit -r apps/requirements.txt --disable-pip --no-deps --progress-spinner off
@@ -137,6 +143,8 @@ jobs:
           retention-days: 14
 
   codeql:
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -163,7 +171,7 @@ jobs:
   image-scan:
     name: Image security
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.image != 'false' }}
+    if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -216,12 +224,14 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: billcollector-playwright:ci
-          format: sarif
-          output: trivy.sarif
+          format: json
+          output: trivy.json
           exit-code: "0"
           severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
           scanners: vuln
           version: v0.70.0
+      - name: Convert the complete scan to SARIF
+        run: trivy convert --format sarif --output trivy.sarif trivy.json
       - name: Upload image findings to GitHub
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
@@ -229,16 +239,24 @@ jobs:
           sarif_file: trivy.sarif
           category: container-image
       - name: Reject fixable high and critical image vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: billcollector-playwright:ci
-          format: table
-          exit-code: "1"
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          scanners: vuln
-          version: v0.70.0
-          skip-setup-trivy: true
+        run: |
+          trivy convert --format table --severity HIGH,CRITICAL trivy.json
+          python3 - <<'PYTHON'
+          import json
+          import sys
+
+          with open("trivy.json") as source:
+              report = json.load(source)
+          findings = [
+              vulnerability
+              for result in report["Results"]
+              for vulnerability in result.get("Vulnerabilities", [])
+              if vulnerability["Severity"] in {"HIGH", "CRITICAL"}
+              and vulnerability.get("FixedVersion")
+          ]
+          print(f"Fixable HIGH/CRITICAL findings: {len(findings)}")
+          sys.exit(bool(findings))
+          PYTHON
       - name: Save the scanned image for publication
         if: env.PUBLISH_REQUESTED == 'true'
         run: docker save --output image.tar billcollector-playwright:ci
@@ -248,7 +266,7 @@ jobs:
         with:
           name: validated-image
           path: image.tar
-          compression-level: 0
+          compression-level: 1
           retention-days: 1
           if-no-files-found: error
 
