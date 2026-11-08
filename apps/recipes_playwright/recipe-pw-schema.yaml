@@ -409,6 +409,8 @@ definitions:
           required: [account_type, max_months, max_items, timeout_ms]
           additionalProperties: false
           properties:
+            collect_statements:
+              type: boolean
             incremental:
               type: boolean
             account_type:

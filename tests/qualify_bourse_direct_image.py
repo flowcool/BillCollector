@@ -38,7 +38,7 @@ hashes = {name: hashlib.sha256((Path('/apps')/name).read_bytes()).hexdigest()
                        'billcollector/db.py', 'billcollector/downloads.py',
                        'billcollector/runner.py', 'billcollector/notify.py',
                        'billcollector/orchestrator.py', 'billcollector/bourse_direct.py', 'billcollector/bourse_direct_boundary.py',
-                       'billcollector/throttle.py', 'billcollector/notice.py',
+                       'billcollector/throttle.py', 'billcollector/notice.py', 'billcollector/bourse_direct_statements.py',
                        'recipes_playwright/recipe-pw-schema.yaml')}
 print(json.dumps({'packaged_source_sha256':hashes, 'uid':os.getuid(),
                   'gid':os.getgid(), 'pypdf':pypdf.__version__}), flush=True)
@@ -137,7 +137,7 @@ def main():
                        'billcollector/db.py', 'billcollector/downloads.py',
                        'billcollector/runner.py', 'billcollector/notify.py',
                        'billcollector/orchestrator.py', 'billcollector/bourse_direct.py', 'billcollector/bourse_direct_boundary.py',
-                           'billcollector/throttle.py', 'billcollector/notice.py',
+                           'billcollector/throttle.py', 'billcollector/notice.py', 'billcollector/bourse_direct_statements.py',
                                'recipes_playwright/recipe-pw-schema.yaml')}
     log_text = (root/'container.log').read_text()
     packaged = next((json.loads(line)['packaged_source_sha256'] for line in log_text.splitlines()

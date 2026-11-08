@@ -71,10 +71,12 @@ class Document(HTMLParser):
 
 
 def validate_options(options):
-    if not isinstance(options, dict) or set(options) - {'incremental'} != {'account_type', 'max_months', 'max_items', 'timeout_ms'}:
+    if not isinstance(options, dict) or set(options) - {'incremental', 'collect_statements'} != {'account_type', 'max_months', 'max_items', 'timeout_ms'}:
         raise SourceError('Bourse Direct options are invalid')
     if type(options.get('incremental', False)) is not bool:
         raise SourceError('Bourse Direct incremental flag must be boolean')
+    if type(options.get('collect_statements', False)) is not bool:
+        raise SourceError('Bourse Direct statement flag must be boolean')
     if options['account_type'] not in {'PEA', 'PEA-PME'}:
         raise SourceError('Bourse Direct account type is unsupported')
     for name, maximum in [('max_months', 120), ('max_items', 200), ('timeout_ms', 7_200_000)]:
@@ -82,19 +84,31 @@ def validate_options(options):
             raise SourceError('Bourse Direct bounds are invalid')
 
 
-def _target(base, relative, *, account, period, pdf=False):
+def _target(base, relative, *, account, period, pdf=False, family='notice'):
     target = urljoin(base, relative)
     parts = urlsplit(target)
     query = parse_qs(parts.query, keep_blank_values=True)
-    expected = {'nc', 'type', 'year', 'month', 'day', 'trash'} | ({'pdf'} if pdf else set())
-    if (parts.scheme + '://' + parts.netloc != ORIGIN or parts.path != NOTICE
+    statement = family == 'statement'
+    if family not in {'notice', 'statement'}:
+        raise SourceError('Bourse Direct document family is unsupported')
+    expected = ({'nc', 'type', 'dt'} | ({'trash'} if pdf else set()) if statement
+                else {'nc', 'type', 'year', 'month', 'day', 'trash'}) | ({'pdf'} if pdf else set())
+    if (parts.scheme + '://' + parts.netloc != ORIGIN
+            or parts.path != ('/priv/new/releveCompte.php' if statement else NOTICE)
             or parts.fragment or set(query) != expected
             or any(len(v) != 1 or not v[0] for v in query.values())
-            or query['nc'] != [account] or query['type'] != ['RO']
-            or query['trash'] != ['/avis.pdf'] or (pdf and query['pdf'] != ['1'])):
+            or query['nc'] != [account] or query['type'] != [('RE' if statement else 'RO')]
+            or ('trash' in expected and query['trash'] != ['/avis.pdf'])
+            or (pdf and query['pdf'] != ['1'])):
         raise SourceError('Bourse Direct document target is not proven')
     try:
-        day = date(*(int(query[key][0]) for key in ('year', 'month', 'day')))
+        if statement:
+            value = query['dt'][0]
+            if not re.fullmatch(r'[0-9]{8}', value):
+                raise ValueError
+            day = date(int(value[:4]), int(value[4:6]), int(value[6:]))
+        else:
+            day = date(*(int(query[key][0]) for key in ('year', 'month', 'day')))
     except (ValueError, TypeError):
         raise SourceError('Bourse Direct document date is invalid') from None
     if (day.year, day.month) != period:
@@ -193,6 +207,7 @@ def collect(ctx, options, save_download, resolve):
             page.wait_for_timeout(min(100, remaining(), state_remaining))
 
     submitted = set()
+    period_post = None
     reserved = False
     pending_key = f'bourse_direct_pending_{task_id}'
     if any(row['state'] != 'consumed' for row in db.list_downloads(task_id=task_id)):
@@ -201,9 +216,21 @@ def collect(ctx, options, save_download, resolve):
         raise SourceError('Bourse Direct prior acquisition needs operator verification')
 
     def guard(route):
+        nonlocal period_post
         request = route.request
         target = urlsplit(request.url)
         if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
+            if period_post is not None:
+                url, fields, owner = period_post
+                if (request.method == 'POST' and request.url.rstrip('?') == url
+                        and request.is_navigation_request()
+                        and request.frame == owner
+                        and request.headers.get('content-type', '').split(';')[0] == 'application/x-www-form-urlencoded'
+                        and len(request.post_data or '') <= 1024
+                        and parse_qs(request.post_data or '', keep_blank_values=True) == fields):
+                    period_post = None
+                    route.continue_()
+                    return
             if (target.scheme + '://' + target.netloc != ORIGIN
                     or target.path not in AUTH or target.path in submitted):
                 route.abort()
@@ -212,6 +239,19 @@ def collect(ctx, options, save_download, resolve):
         route.continue_()
 
     context.route('**/*', guard)
+
+    def arm_period_post(url, fields, owner):
+        nonlocal period_post
+        if period_post is not None:
+            raise SourceError('Bourse Direct period submission is still pending')
+        period_post = (url, fields, owner)
+
+        def verify_submission():
+            if period_post is not None:
+                raise SourceError('Bourse Direct qualified period POST was not observed')
+
+        return verify_submission
+
     try:
         if urlsplit(page.url).scheme + '://' + urlsplit(page.url).netloc != ORIGIN:
             raise SourceError('Bourse Direct entry origin is invalid')
@@ -320,6 +360,11 @@ def collect(ctx, options, save_download, resolve):
                 with frame.expect_navigation(wait_until='domcontentloaded', timeout=min(15000, remaining())):
                     control.click(timeout=min(15000, remaining()))
                 frame.locator('select#nc').wait_for(timeout=min(15000, remaining()))
+        if options.get('collect_statements', False):
+            from .bourse_direct_statements import collect_statements
+
+            count += collect_statements(ctx, options, selected, count, save_download,
+                                        remaining, wait, arm_period_post, pending_key, completed)
         return count
     except RunInterrupted:
         raise

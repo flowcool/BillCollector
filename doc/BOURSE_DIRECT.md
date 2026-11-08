@@ -88,6 +88,55 @@ filters `BourseDirect_*.pdf` and sets owner, exact Source `Bourse Direct`, and r
 permissions. Infra verifies the archived original and those fields independently.
 `consumed` records local publication, not a Paperless receipt.
 
+## Optional monthly statements
+
+The existing `bourse_direct` options accept `collect_statements: true`.
+The default is `false`. Keep the step's existing notice identity:
+`query_parameters: [nc, type, year, month, day]`. The engine supplies a separate
+`[nc, type, dt]` identity for each monthly statement original. Other recipe
+actions keep their existing identity policy. No new task or login is needed.
+
+After notices, the same source transaction opens the offered statement page.
+It compares the complete selected-account label with the notice account label.
+The numeric `nc` values may differ. A missing or different label stops collection.
+The engine reads every offered monthly period on each run, in both collection
+modes. `max_months` still bounds the notice window; it does not truncate the
+statement list. The statement list has a safety bound of 120 unique periods.
+`max_items` bounds notices and statements together. The existing total deadline
+and document gate apply to statement form submissions, HTML reads and PDF reads.
+
+Only the qualified `frmRlv` native period POST is permitted. Each permission
+binds the same-origin route, frame, method and exact `nc`/`RlvCombo` fields.
+It expires after one navigation request. A changed list, ambiguous month,
+stalled selector, missing POST, or wrong account/family/date stops acquisition.
+The engine follows the offered `releveCompte.php` HTML and its unique PDF link.
+It never builds an unoffered PDF target. Annual and securities statements stay
+outside this action.
+
+Statement filenames are
+`BourseDirect_Statement_<account-kind>_<YYYY-MM>_<offered-date>.pdf`.
+The offered date can be a last business day. The tracker retains original bytes,
+hashes and distinct content revisions. Regenerated metadata alone does not cause
+publication. An unchanged repeat creates audit rows, with zero new files or
+consumer calls. Notices keep their prior names, source identities and bytes.
+Statements use the same strict delivery policy and pending-acquisition key.
+An uncertain statement blocks a subsequent source run without automatic resend.
+
+Infra must promote the packaged schema when enabling this option, then install
+the qualified catalog recipe. No database migration or new Settings key is added.
+The existing `BourseDirect_*.pdf` consumption workflow matches these filenames.
+Infra owns the document type, access and original-byte archive readback.
+To roll back offline, revert the focused engine change. For a live rollback,
+retain the database and journal and remove the opt-in through Infra's reviewed
+rollout. The previous schema refuses the new option.
+
+Synthetic proof: `python -m pytest tests/test_bourse_direct.py -q`.
+It covers 21 offered periods, notice count/hash controls, repeats, new and late
+months, corrected revisions, source refusal and uncertain delivery recovery.
+`tests/qualify_bourse_direct_image.py` repeats this proof on packaged code and
+checks its source hashes. It injects credentials/TOTP and synthetic consumers;
+it does not qualify vault transport, live portal behavior or Paperless delivery.
+
 ## Request pacing
 
 The engine uses independent durable login and document gates from the reusable
@@ -105,10 +154,12 @@ instance-wide document timestamp. HTML/calendar requests keep their current
 behavior. A document read does not defer the next permitted login.
 
 Lock contention and document waits consume the same bounded run deadline.
-For N original PDFs the pacing component is at most N minus one document
+For N notice-only PDFs the pacing component is at most N minus one document
 intervals when starting from an unused document gate; an existing reservation
 can add one interval. Network, parsing and navigation time also consume the
-budget. No gate retries a request or resumes an uncertain acquisition.
+budget. Statement collection also gates period submissions and HTML reads;
+include those requests when sizing its deadline. No gate retries a request or
+resumes an uncertain acquisition.
 
 Retained qualification tooling used 60 seconds as an operator precaution for
 both request classes. The retained capture implementation supplies no measured
