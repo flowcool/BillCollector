@@ -154,10 +154,12 @@ instance-wide document timestamp. HTML/calendar requests keep their current
 behavior. A document read does not defer the next permitted login.
 
 Lock contention and document waits consume the same bounded run deadline.
-For N original PDFs the pacing component is at most N minus one document
+For N notice-only PDFs the pacing component is at most N minus one document
 intervals when starting from an unused document gate; an existing reservation
 can add one interval. Network, parsing and navigation time also consume the
-budget. No gate retries a request or resumes an uncertain acquisition.
+budget. Statement collection also gates period submissions and HTML reads;
+include those requests when sizing its deadline. No gate retries a request or
+resumes an uncertain acquisition.
 
 Retained qualification tooling used 60 seconds as an operator precaution for
 both request classes. The retained capture implementation supplies no measured
