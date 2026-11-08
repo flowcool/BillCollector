@@ -96,7 +96,7 @@ Every release and Infra handoff states the SHA-256 of
 `apps/recipes_playwright/recipe-pw-schema.yaml`. This candidate's schema is:
 
 ```text
-d36f7a584e6b153ab54c7971e650491a94574ac6926a79aa5919f6695338bff3
+cebc9c7c6fb09f5d171f322a0cce92dd33a66d519478437c02559b16ef222b07
 ```
 
 Calculate it from the exact candidate with

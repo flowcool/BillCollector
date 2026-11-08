@@ -23,6 +23,16 @@ from billcollector.variables import DateContext
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_recipe_accepts_optional_statement_family_without_changing_notice_identity():
+    recipe = yaml.safe_load((ROOT / 'tests/fixtures/bourse_direct.yaml').read_text())
+    options = recipe['services'][0]['steps'][1]['methods'][-1]['arguments'][0]
+    options['collect_statements'] = True
+    ok, error, _ = recipes.validate_recipe(yaml.safe_dump(recipe))
+    assert ok, error
+    options['collect_statements'] = 'true'
+    assert not recipes.validate_recipe(yaml.safe_dump(recipe))[0]
+
+
 def original(generation, corrected=False):
     writer = PdfWriter()
     page = writer.add_blank_page(width=100, height=100)
@@ -39,7 +49,10 @@ def original(generation, corrected=False):
 def lab(tmp_path, monkeypatch):
     data = SimpleNamespace(generation=0, corrected=False, requests=[], reservations=[],
                            refused=[], pdfs=[], wrong_pdf=False, empty=False,
-                           missing_pdf=False, same_date=False, calendar_delay=0, oldest_period=None)
+                           missing_pdf=False, same_date=False, calendar_delay=0, oldest_period=None,
+                           statements=[('2025-12', '20251231'), ('2025-11', '20251128')],
+                           statement_fault=None, statement_corrected=False, statement_pdfs=[], posts=[],
+                           probe_posts=False)
     db_path = tmp_path / 'proof.db'
 
     class Portal(BaseHTTPRequestHandler):
@@ -55,8 +68,12 @@ def lab(tmp_path, monkeypatch):
             self.wfile.write(body if isinstance(body, bytes) else body.encode())
 
         def do_POST(self):
-            self.rfile.read(int(self.headers.get('Content-Length', '0')))
+            fields = parse_qs(self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode())
             data.requests.append(('POST', self.path))
+            data.posts.append((self.path, fields))
+            if urlsplit(self.path).path == '/priv/new/releves.php':
+                self.statements(fields)
+                return
             with sqlite3.connect(db_path) as connection:
                 data.reservations.append(connection.execute('SELECT login_pending_run_id FROM Task').fetchone()[0])
             if self.path == '/hub/auth/login':
@@ -92,10 +109,28 @@ def lab(tmp_path, monkeypatch):
                 data.refused.append(parsed.path)
                 self.send_error(403)
                 return
-            if parsed.path in {'/fr/login', '/fr/page/inventaire', '/fr/page/avis-operes'}:
+            if parsed.path in {'/fr/login', '/fr/page/inventaire', '/fr/page/avis-operes', '/fr/page/releves'}:
                 frame = ('<iframe src="/priv/new/avis-operes.php?nc=1&tr=RO&month=1&year=2026"></iframe>'
                          if parsed.path == '/fr/page/avis-operes' else '')
-                self.respond(3 * '<nav hidden><a href="/fr/deconnexion">Logout</a><a href="/fr/page/avis-operes">Notices</a></nav>' + frame)
+                if parsed.path == '/fr/page/releves':
+                    frame = '<iframe src="/priv/new/releves.php"></iframe>'
+                self.respond(3 * '<nav hidden><a href="/fr/deconnexion">Logout</a><a href="/fr/page/avis-operes">Notices</a><a href="/fr/page/releves">Statements</a></nav>' + frame)
+            elif parsed.path == '/priv/new/releves.php':
+                self.statements(query)
+            elif parsed.path == '/priv/new/releveCompte.php':
+                if query.get('pdf') == ['1']:
+                    body = original(data.generation, data.statement_corrected and query['dt'] == ['20251128'])
+                    data.statement_pdfs.append((dict(query), body))
+                    self.respond(body, 'application/pdf')
+                else:
+                    if data.statement_fault == 'pdf_account':
+                        query['nc'] = ['1']
+                    if data.statement_fault == 'pdf_family':
+                        query['type'] = ['RT']
+                    query.update(trash=['/avis.pdf'], pdf=['1'])
+                    href = 'releveCompte.php?' + urlencode({k:v[0] for k,v in query.items()})
+                    link = f'<a href="{href}">Format PDF</a>'
+                    self.respond(link * (2 if data.statement_fault == 'pdf_ambiguous' else 1))
             elif parsed.path == source.CALENDAR:
                 time.sleep(data.calendar_delay)
                 nc = query.get('nc', ['1'])[0]
@@ -129,6 +164,46 @@ def lab(tmp_path, monkeypatch):
             else:
                 data.refused.append(parsed.path)
                 self.send_error(404)
+
+        def statements(self, fields):
+            # Deliberately different nc: the selected label, not the notice nc,
+            # proves the same account. Position changes when months are inserted.
+            index = int(fields.get('RlvCombo', ['0'])[0])
+            if data.statement_fault == 'stalled':
+                index = 0
+            account = '9'
+            label = 'OTHER Holder' if data.statement_fault == 'account_label' else 'SYNTHETIC001 Holder'
+            months = dict(enumerate(('Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+                                     'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'), 1))
+            options = ''.join(f'<option value="{i}" {"selected" if i == index else ""}>'
+                              f'{months[int(period[5:])]} {period[:4]}</option>'
+                              for i, (period, _) in enumerate(data.statements))
+            if data.statement_fault == 'ambiguous_period':
+                options += '<option value="99">Novembre 2025</option>'
+            dt = data.statements[index][1]
+            if data.statement_fault == 'wrong_period':
+                dt = '20240930'
+            kind = 'RT' if data.statement_fault == 'wrong_family' else 'RE'
+            form_nc = '1' if data.statement_fault == 'form_account' else account
+            popup = f"javascript:ouvrePopup('releveCompte.php?nc={account}&dt={dt}&type={kind}','encours')"
+            onchange = 'document.frmRlv.submit()'
+            if data.probe_posts:
+                onchange = '''Promise.all([
+                  fetch('/priv/new/releves.php',{method:'POST',body:new URLSearchParams(new FormData(this.form))}),
+                  fetch('/priv/new/releves.php',{method:'POST',body:'nc=OTHER&RlvCombo=1'}),
+                  fetch('/priv/new/releves.php',{method:'POST',body:'nc=9&RlvCombo=1&extra=1'}),
+                  fetch('/priv/new/transfer.php',{method:'POST',body:'nc=9'})
+                ].map(p=>p.catch(()=>null))).then(()=>document.frmRlv.submit())'''
+            if data.statement_fault == 'get_period':
+                onchange = "location.href='releves.php?RlvCombo='+this.value"
+            self.respond(f'''<form id="frmCompte" method="get"><select id="nc" name="nc">
+              <option value="9" selected>{label} (Compte PEA)</option>
+              <option value="8">SYNTHETIC002 Holder (Compte PEA-PME)</option></select></form>
+              <form id="frmRlv" name="frmRlv" action="?" method="post">
+              <input type="hidden" name="nc" value="{form_nc}">
+              <select name="RlvCombo" onchange="{onchange}">{options}</select></form>
+              <a href="{popup}">Relevé de compte</a>
+              <a href="javascript:ouvrePopup('releveTitres.php?nc=9&dt={dt}&type=RT','encours')">Titres</a>''')
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Portal)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -202,6 +277,127 @@ def test_actual_recipe_login_originals_regenerated_repeat_and_correction(lab, mo
     for record in rows:
         assert Path(record['saved_path']).read_bytes().startswith(b'%PDF-')
     assert Path(rows[0]['saved_path']).read_bytes() == lab.pdfs[0][1]
+
+
+def enable_statements(lab):
+    lab.recipe['services'][0]['steps'][1]['methods'][-1]['arguments'][0]['collect_statements'] = True
+
+
+def test_combined_full_statement_list_and_repeat_preserve_notice_bytes(lab):
+    (_, aborted, _), notices = lab.run()
+    assert not aborted and len(notices) == 2
+    hashes = [row['sha256'] for row in notices]
+    enable_statements(lab)
+    (_, aborted, _), rows = lab.run()
+    assert not aborted and len(rows) == 4
+    assert [row['sha256'] for row in rows[:2]] == hashes
+    assert all(row['duplicate_of_id'] is not None for row in rows[:2])
+    statements = rows[2:]
+    assert [r['filename'] for r in statements] == [
+        'BourseDirect_Statement_PEA_2025-12_2025-12-31.pdf',
+        'BourseDirect_Statement_PEA_2025-11_2025-11-28.pdf']
+    assert all(r['source_identity'] and r['revision_sha256'] for r in statements)
+    for row, (_, body) in zip(statements, lab.statement_pdfs):
+        assert Path(row['saved_path']).read_bytes() == body
+    assert len(lab.seen) == 4
+    (_, aborted, _), rows = lab.run()
+    assert not aborted and all(r['duplicate_of_id'] is not None for r in rows)
+    assert len(lab.seen) == 4
+    assert len([path for path, _ in lab.posts if path in source.AUTH]) == 3
+    assert all(path in source.AUTH or path.rstrip('?') == '/priv/new/releves.php' for path, _ in lab.posts)
+
+
+def test_statement_post_guard_allows_only_armed_native_navigation(lab):
+    enable_statements(lab)
+    lab.probe_posts = True
+    (_, aborted, _), rows = lab.run()
+    assert not aborted and len(rows) == 4
+    assert [(p.rstrip('?'), fields) for p, fields in lab.posts if p not in source.AUTH] == [
+        ('/priv/new/releves.php', {'nc': ['9'], 'RlvCombo': ['1']})]
+
+
+@pytest.mark.parametrize('mode', ['all', 'incremental'])
+def test_new_late_statement_and_corrected_revision_do_not_republish_notices(lab, mode):
+    enable_statements(lab)
+    (_, aborted, _), first = lab.run(mode=mode)
+    assert not aborted and len(lab.seen) == 4
+    lab.statements.insert(0, ('2026-01', '20260114'))
+    lab.statements.append(('2025-10', '20251031'))
+    lab.generation = 1  # All PDFs receive new generation metadata.
+    (_, aborted, _), rows = lab.run(mode=mode)
+    assert not aborted and len(rows) == 6 and len(lab.seen) == 6
+    assert [r['duplicate_of_id'] is None for r in rows] == [False, False, True, False, False, True]
+    lab.statement_corrected = True
+    (_, aborted, _), rows = lab.run(mode=mode)
+    assert not aborted and len(lab.seen) == 7
+    revised = [r for r in rows if r['duplicate_of_id'] is None]
+    assert len(revised) == 1 and revised[0]['source_identity'] == first[3]['source_identity']
+    assert revised[0]['revision_sha256'] != first[3]['revision_sha256']
+    assert Path(first[3]['saved_path']).read_bytes() == original(0)
+    (_, aborted, _), rows = lab.run(mode=mode)
+    assert not aborted and len(lab.seen) == 7
+    assert all(r['duplicate_of_id'] is not None for r in rows)
+    assert len([p for p, _ in lab.posts if p in source.AUTH]) == 3
+
+
+def test_full_offered_statement_list_is_independent_of_notice_date_window(lab):
+    enable_statements(lab)
+    lab.statements = [(f'{year}-{month:02}', f'{year}{month:02}28')
+                      for year, months in [(2025, range(12, 0, -1)), (2024, range(12, 3, -1))]
+                      for month in months]
+    (_, aborted, _), rows = lab.run()
+    assert not aborted and len(rows) == 23
+    assert len(lab.statement_pdfs) == 21
+    assert {q['dt'][0] for q, _ in lab.statement_pdfs} == {dt for _, dt in lab.statements}
+
+
+@pytest.mark.parametrize('fault', ['account_label', 'form_account', 'ambiguous_period',
+                                  'wrong_family', 'wrong_period', 'pdf_account',
+                                  'pdf_family', 'pdf_ambiguous', 'stalled', 'get_period'])
+def test_statement_source_drift_never_reads_unproven_original(lab, fault):
+    enable_statements(lab)
+    lab.statement_fault = fault
+    (_, aborted, _), rows = lab.run()
+    assert aborted
+    expected = 1 if fault in {'stalled', 'get_period'} else 0
+    assert len(lab.statement_pdfs) == expected
+    assert len(rows) == len(lab.seen) == 2 + expected
+    # Notice originals remain untouched even when statement acquisition fails.
+    assert [r['sha256'] for r in rows[:2]] == [downloads.sha256_of(r['saved_path']) for r in rows[:2]]
+
+
+@pytest.mark.parametrize('interrupt', [False, True])
+def test_uncertain_statement_delivery_stops_restart_without_resend(lab, monkeypatch, interrupt):
+    from billcollector.interrupt import RunInterrupted
+
+    enable_statements(lab)
+    effects = []
+
+    def consume(record):
+        effects.append(record)
+        if 'Statement' in record['filename']:
+            if interrupt:
+                raise RunInterrupted()
+            raise TimeoutError('Synthetic uncertain statement delivery')
+
+    monkeypatch.setattr(downloads, 'CONSUMERS', [consume])
+    if interrupt:
+        with pytest.raises(RunInterrupted):
+            lab.run()
+    else:
+        assert lab.run()[0][1]
+    rows = lab.db.list_downloads(task_id=lab.task_id)
+    uncertain = [r for r in rows if r['state'] == 'delivery_uncertain']
+    assert len(uncertain) == 1 and 'Statement' in uncertain[0]['filename']
+    assert uncertain[0]['delivery_policy'] == 'bourse-direct'
+    assert Path(uncertain[0]['saved_path']).read_bytes() == lab.statement_pdfs[0][1]
+    before = (len(effects), len(lab.requests), len(lab.statement_pdfs))
+    restarted = Database(lab.db.path)
+    downloads.recover_downloads(restarted)
+    restarted.close()
+    assert lab.run()[0][1]
+    assert (len(effects), len(lab.statement_pdfs)) == (before[0], before[2])
+    assert len([p for p, _ in lab.posts if p in source.AUTH]) == 3
 
 
 def test_month_replacement_and_year_rollover_keep_complete_first_month(lab):

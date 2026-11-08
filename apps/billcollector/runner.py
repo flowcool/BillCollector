@@ -566,7 +566,8 @@ def _collection_actions(ctx, step=None):
         if not step or step.get('notice_identity') != POLICY:
             raise collection.CollectionError('Bourse Direct requires its source identity policy')
         return collect(ctx, options,
-                       lambda download: save_download(download, delivery_policy="bourse-direct"),
+                       lambda download: save_download(download, delivery_policy="bourse-direct",
+                                                      identity=getattr(download, 'identity', POLICY)),
                        lambda token: process_argument(token, ctx.bcs))
 
     def bourse_direct_adapter(_root, options):
@@ -576,7 +577,7 @@ def _collection_actions(ctx, step=None):
             raise collection.CollectionError('adapter requires native final-session proof')
         return collect(ctx, getattr(ctx, 'bourse_direct_candidate', None), options, save_download)
 
-    def save_download(download, *, source_key=None, unpack=None, delivery_policy=None):
+    def save_download(download, *, source_key=None, unpack=None, delivery_policy=None, identity=None):
         filename = str(download.suggested_filename)
         # An unpacked archive name is a transport name, not document identity.
         if unpack is None and filename in collection_filenames and not identity_kwargs:
@@ -588,7 +589,8 @@ def _collection_actions(ctx, step=None):
                     "delivery_policy": delivery_policy}.items()
                    if v is not None}
         record = downloads.track_download(
-            download, ctx.run_id, ctx.task, ctx.db, **options, **identity_kwargs
+            download, ctx.run_id, ctx.task, ctx.db, **options,
+            **({'identity': identity} if identity is not None else identity_kwargs)
         )
         collection_filenames.add(filename)
         ctx.files_downloaded.append({
