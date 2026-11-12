@@ -237,7 +237,7 @@ Both paths share the same host setup: the data folders the container writes to a
 1. Pull the prebuilt image. The sample tag in the docs is updated with each release:
 
    ```bash
-    docker pull ghcr.io/s-t-e-f-a-n/billcollector:v0.5
+   docker pull ghcr.io/s-t-e-f-a-n/billcollector:v0.5
    ```
 
 2. Save the compose file below as `docker-compose.yml` in the project folder. It is the reference service from the repository's `docker-compose.yml` without its `build:` section; the pinned Chromium seccomp profile it references is fetched from the repository too:
@@ -251,7 +251,7 @@ Both paths share the same host setup: the data folders the container writes to a
    ```yaml
    services:
      billcollector:
-        image: ghcr.io/s-t-e-f-a-n/billcollector:v0.5
+       image: ghcr.io/s-t-e-f-a-n/billcollector:v0.5
        container_name: billcollector
        restart: unless-stopped
        init: true
@@ -647,9 +647,9 @@ The `Dockerfile` orders the expensive, rarely-changing steps (python3/pip `apt` 
 - A code-only change under `apps/` re-runs only the final `COPY` and `chown` steps.
 - A `requirements.txt` change re-runs `pip3 install` and the steps after it, but not the python3 `apt` step or the base image.
 
-The deployed commit is recorded in the deploy log (`deploy_remote.sh` prints `git log -1`) rather than as an image label.
+The fork publisher records the deployed source in the `org.opencontainers.image.revision` label. The local deploy script also prints `git log -1`.
 
-The published-image workflow (`.github/workflows/publish.yml`) is the one exception: it passes `VERSION` - the release tag - as a build arg on every publication. The image `LABEL` block is kept at the **end** of the `Dockerfile` for exactly this reason, so a per-tag `VERSION` invalidates only the final metadata layer and a new tag still reuses the pip/playwright build cache. The tag is carried as the `org.opencontainers.image.version` label of the published image.
+The fork image publisher (`.github/workflows/assurance.yml`) supplies version and revision metadata. Upstream uses its separate `.github/workflows/publish.yml`: it passes `VERSION` - the release tag - as a build arg on every publication. The image `LABEL` block is kept at the **end** of the `Dockerfile` for exactly this reason, so a per-tag `VERSION` invalidates only the final metadata layer and a new tag still reuses the pip/playwright build cache. The tag is carried as the `org.opencontainers.image.version` label of the published image.
 
 ## Development & Deployment
 

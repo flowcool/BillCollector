@@ -572,10 +572,12 @@ def test_resolve_recipe_path_explicit_override_still_wins(
     custom.write_text(VALID, encoding="utf-8")
     # A non-default stored path that exists wins over the overlay.
     assert config.resolve_recipe_path(str(custom), "Winsim") == str(custom)
-    # A non-default stored path that does not exist falls back.
+    # A missing explicit path must fail closed even when a valid fallback exists.
+    (extra / "recipe-pw__winsim.yaml").write_text(VALID, encoding="utf-8")
     missing = tmp_path / "custom" / "nope.yaml"
-    assert config.resolve_recipe_path(str(missing), "Winsim") == \
-        str(built_in / "recipe-pw__winsim.yaml")
+    resolved = config.resolve_recipe_path(str(missing), "Winsim")
+    assert resolved == str(missing)
+    assert recipes.load_recipe(resolved)[0] is False
 
 
 def test_recipe_extra_dir_none_when_env_unset_or_blank(monkeypatch):

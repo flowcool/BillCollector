@@ -475,3 +475,15 @@ async def test_downloads_page_retry_confirms_and_routes(user, testdb,
     rows = table.rows
     assert next(r for r in rows
                 if r["id"] == seed["dl1"])["delivery"] == "delivered"
+
+
+async def test_detail_recipe_label_uses_runtime_overlay_resolution(user, testdb, tmp_path, monkeypatch):
+    extra = tmp_path / "overlay"
+    extra.mkdir()
+    (extra / "recipe-pw__overlay-svc.yaml").write_text("synthetic", encoding="utf-8")
+    monkeypatch.setattr(config, "RECIPE_EXTRA_DIR", extra)
+    task = testdb.create_task("overlay-svc", "user", recipe_file=str(config.recipe_builtin_path_for("overlay-svc")))
+    await _login(user, testdb)
+    await user.open(f"/tasks/{task}")
+    (label,) = user.find(marker="detail-recipe-label").elements
+    assert label.text == "Recipe: recipe-pw__overlay-svc.yaml"

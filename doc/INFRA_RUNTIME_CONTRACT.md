@@ -135,11 +135,25 @@ rows to make an old binary start.
 | Task field | Infra meaning |
 | --- | --- |
 | `service`, `user` | Unique task pair and exact vault-name components. Preserve identity across upgrades. |
-| `recipe_file` | Explicit absolute recipe path; otherwise derived from `service`. |
+| `recipe_file` | A non-default explicit path wins, including when missing (the run fails before credentials). NULL or the service default uses runtime overlay resolution. |
 | `enabled`, `cron` | Automatic scheduling; manual Run now does not enable the task. Cron and dates use `TZ`. |
 | `profile_dir` | Persistent browser session path within the configured profile root. |
 | `date_window_days` | Positive integer, default `90`; per task, not a Settings key or environment variable. |
 | Login fields | Persistent attempt/lock state owned by the daemon; use its reviewed clear/recovery path. |
+
+At `serve` startup, `reconcile_recipe_files` resets stored paths equal to the
+service's built-in default to NULL. New tasks also store NULL. With
+`BC_RECIPE_EXTRA_DIR`, a same-named file there wins and UI saves target that
+directory; otherwise the built-in directory is used. A non-default explicit path
+is preserved and never falls back when missing. Invalid legacy service names are
+left untouched during reconciliation so they cannot block daemon startup.
+The task-detail label and runner use the same path resolver.
+
+This startup update changes existing Task rows. Infra must retain its verified DB
+backup before adoption. If an existing task must keep a specific catalog recipe
+regardless of an overlay, use a reviewed non-default path through Infra's task
+configuration operation. The trusted adapter module path remains fixed to the
+catalog; the overlay does not select a Python module.
 
 `date_window_days` includes the run-start day. `--date-from-stdin` overrides the
 start for one run; the end is the captured current date in `TZ` (default `UTC`).

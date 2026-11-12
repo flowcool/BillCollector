@@ -191,13 +191,14 @@ def resolve_recipe_path(stored: str | None, service: str) -> str:
     """The effective recipe path for a run (the runner's run-time resolution).
 
     A task's stored ``recipe_file`` wins only when it is set, is not the
-    auto-populated built-in default for the service, and the file exists;
-    otherwise the overlay-aware :func:`recipe_path_for` is used. So a shadow
+    auto-populated built-in default for the service; a missing explicit file
+    must fail at load time instead of selecting another recipe.
+    Otherwise the overlay-aware :func:`recipe_path_for` is used. So a shadow
     added after task creation takes effect for existing tasks, and a stale
     built-in snapshot (stored before the column stopped being auto-populated)
     never hides a shadow. An explicit non-default path still wins."""
     builtin = str(recipe_builtin_path_for(service))
-    if stored and stored != builtin and Path(stored).exists():
+    if stored and stored != builtin:
         return stored
     return str(recipe_path_for(service))
 

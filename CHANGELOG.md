@@ -11,10 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Integrate upstream v0.5 recipe overlays while preserving fork path validation,
+- Integrate [upstream v0.5](https://github.com/s-t-e-f-a-n/BillCollector/releases/tag/v0.5) recipe overlays while preserving fork path validation,
   trusted adapter paths, monthly statements and the fork image publisher.
 
 ### Fixed
+
+- Keep explicit missing recipe paths fail-closed. Skip invalid legacy services
+  during startup recipe reconciliation and align the task-detail recipe label.
 
 - Refresh the Ubuntu 24.04 base digest and explicitly update libpcre2-8-0
   during image builds to resolve seven PCRE vulnerabilities.
@@ -106,8 +109,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pause notifications now default to an empty `ntfy_topic` (opt-in).
   Operators who used the implicit `billcollector` topic must set their
   topic in Settings. Existing stored topics remain active.
-
-## [v0.5] - 2026-11-11
 
 ### Added
 

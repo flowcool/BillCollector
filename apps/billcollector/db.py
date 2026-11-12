@@ -382,7 +382,12 @@ class Database:
             stored = row["recipe_file"]
             if stored is None:
                 continue
-            if stored == str(config.recipe_builtin_path_for(row["service"])):
+            try:
+                builtin = str(config.recipe_builtin_path_for(row["service"]))
+            except ValueError:
+                # Invalid legacy services must not prevent other tasks starting.
+                continue
+            if stored == builtin:
                 self.conn.execute(
                     "UPDATE Task SET recipe_file=NULL, updated_at=? WHERE id=?",
                     (now(), row["id"]))

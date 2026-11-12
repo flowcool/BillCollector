@@ -354,6 +354,13 @@ class DatabaseTests(unittest.TestCase):
         self.db.reconcile_recipe_files()
         self.assertEqual(self.db.get_task(tid)["recipe_file"], custom)
 
+    def test_reconcile_recipe_files_skips_invalid_legacy_service(self):
+        invalid = self.db.create_task("A/B Bank", "u1", recipe_file="/catalog/legacy.yaml")
+        valid = self.db.create_task("svca", "u2", recipe_file=str(config.recipe_builtin_path_for("svca")))
+        self.db.reconcile_recipe_files()
+        self.assertEqual(self.db.get_task(invalid)["recipe_file"], "/catalog/legacy.yaml")
+        self.assertIsNone(self.db.get_task(valid)["recipe_file"])
+
     def test_reconcile_recipe_files_is_idempotent(self):
         tid = self.db.create_task("svca", "u1")
         self.db.conn.execute(
