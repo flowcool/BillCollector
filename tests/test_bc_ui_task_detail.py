@@ -487,3 +487,12 @@ async def test_detail_recipe_label_uses_runtime_overlay_resolution(user, testdb,
     await user.open(f"/tasks/{task}")
     (label,) = user.find(marker="detail-recipe-label").elements
     assert label.text == "Recipe: recipe-pw__overlay-svc.yaml"
+
+
+async def test_invalid_legacy_service_keeps_task_detail_available(user, testdb):
+    task = testdb.create_task("A/B Bank", "user", recipe_file="/catalog/missing.yaml")
+    await _login(user, testdb)
+    await user.open(f"/tasks/{task}")
+    await user.should_see("Recipe: invalid service name")
+    assert user.find(marker="detail-stop").elements
+    assert user.find(marker="detail-login-clear").elements
