@@ -27,9 +27,13 @@ separately if you do not already have one. Never expose `bw serve` publicly.
 git clone --branch playwright-next https://github.com/flowcool/BillCollector.git
 cd BillCollector
 git rev-parse HEAD
-mkdir -p apps/Downloads apps/db apps/data apps/browser/profiles
+mkdir -p apps/Downloads apps/db apps/data apps/browser/profiles apps/recipes
 cp apps/.env.example apps/.env
 ```
+
+Fork deployments use `ghcr.io/flowcool/billcollector-playwright` with a qualified
+immutable digest. The upstream `v0.5` image has a separate feature set; see the
+[Infra runtime contract](INFRA_RUNTIME_CONTRACT.md).
 
 Record the revision with your installation notes. In `apps/.env`, replace the
 `BW_API_URL` placeholder with the private HTTP URL of your **bw serve API**.
@@ -39,10 +43,11 @@ to that container. Set `BW_API_HOST` only if the API requires a different HTTP
 Host header; see [vault transport](vault_transport.md).
 
 The default container UID/GID is `1000:1000`. Give that identity write access
-to the four new data directories. For this fresh checkout only:
+to the five new data directories (the fifth, `apps/recipes`, is the user
+recipe overlay and may stay empty). For this fresh checkout only:
 
 ```bash
-sudo chown -R 1000:1000 apps/Downloads apps/db apps/data apps/browser/profiles
+sudo chown -R 1000:1000 apps/Downloads apps/db apps/data apps/browser apps/recipes
 ```
 
 If you choose another UID/GID, set `APP_UID` and `APP_GID` in the root `.env`
@@ -133,11 +138,17 @@ docker compose -p billcollector-local -f docker-compose.yml -f compose.local.yam
 
 ## Limits and pending work
 
-- The reference Compose file persists downloads, database, runtime data and
-  browser profiles. It does **not** mount `apps/recipes_playwright`. Export a
-  reviewed recipe edit outside the container before replacing it. A container
-  restart and a container recreation have different persistence effects.
-  The permanent recipe storage policy remains maintainer-owned (issue #27 F02).
+- Recipe storage (issue #27 F02, resolved by the user recipe overlay): the
+  reference Compose file mounts `apps/recipes` as the overlay
+  (`BC_RECIPE_EXTRA_DIR`). A per-service file there shadows the built-in
+  recipe of the same name, and the UI recipe editor saves into it, so a
+  synthetic UI edit survives container recreation with identical content.
+  Built-in recipes stay maintainer-owned and update with the image; a shadow
+  keeps winning across image upgrades until you update or delete it (no
+  auto-merge). The mounted folder is the durable store (export = copy the
+  directory); mounting a git checkout instead of a plain folder enables the
+  git auto-commit history. See [Adding or updating recipes via the mounted
+  directory](RECIPE_AUTHORING.md#adding-or-updating-recipes-via-the-mounted-directory).
 - The separate noVNC routing/authentication design remains maintainer-owned
   (issue #27 F03). This guide qualifies local UI access only.
 - Runtime dates are integrated in the fork and public upstream. Pre-run

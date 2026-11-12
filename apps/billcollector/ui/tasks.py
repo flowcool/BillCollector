@@ -132,9 +132,9 @@ def open_task_dialog(db: Database, scheduler: TaskScheduler, refresh,
                 except ValueError as e:
                     ui.notify(str(e), type="negative")
                     return
+                # Resolve the overlay-aware recipe at run time.
                 new_id = db.create_task(
                     service, user,
-                    recipe_file=str(recipe),
                     enabled=enabled, cron=cron, date_window_days=window,
                     profile_dir=str(profile))
                 scheduler.sync_task(new_id)

@@ -161,11 +161,15 @@ def register_task_detail(db: Database, orchestrator: Orchestrator) -> None:
                 color=STATUS_COLORS.get(task["status"], "grey")).mark("detail-status")
             ui.label(f"Enabled: {'yes' if task['enabled'] else 'no'} · "
                      f"Cron: {task['cron'] or '—'}").mark("detail-schedule")
-        recipe_path = task["recipe_file"] or str(
-            config.recipe_path_for(task["service"]))
-        recipe_state = "" if Path(recipe_path).exists() else " (missing)"
+        try:
+            recipe_path = config.resolve_recipe_path(
+                task["recipe_file"], task["service"])
+            recipe_state = "" if Path(recipe_path).exists() else " (missing)"
+            recipe_label = f"{Path(recipe_path).name}{recipe_state}"
+        except ValueError:
+            recipe_label = "invalid service name"
         login_status = ui.label().mark("detail-login-status")
-        ui.label(f"Recipe: {Path(recipe_path).name}{recipe_state}"
+        ui.label(f"Recipe: {recipe_label}"
                  ).mark("detail-recipe-label")
 
         # ---- Actions ----------------------------------------------------

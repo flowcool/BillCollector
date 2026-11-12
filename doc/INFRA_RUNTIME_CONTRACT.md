@@ -77,9 +77,13 @@ Preserve optional-TOTP behavior and fresh TOTP retrieval through this same clien
 Provider recipes come from `flowcool/billcollector-recipes`. The engine no
 longer packages the Bourse Direct deployment recipe; its retained YAML is a
 synthetic test fixture under `tests/fixtures/`. Infra must install the reviewed
-catalog and set the existing task recipe_file to the exported
-`/apps/recipes_playwright/recipe-pw__bourse_direct.yaml` path. Existing mounted
-files are not deleted by an image update. Preserve the task service/user pair,
+catalog at `/apps/recipes_playwright/recipe-pw__bourse_direct.yaml`. For this
+reviewed-catalog integration, keep `BC_RECIPE_EXTRA_DIR` unset or empty and use
+NULL/default task resolution. A default path stored by an older task is reset
+to NULL on startup and still selects that mounted catalog when no overlay is
+enabled. If Infra elects to enable overlays, qualify their precedence and UI save
+target before rollout, or pin a reviewed non-default recipe path. Existing
+mounted files are not deleted by an image update. Preserve the task service/user pair,
 DB and journal identities. Do not create a second task to adopt the filename.
 
 ## Recipe schema promotion
@@ -135,11 +139,25 @@ rows to make an old binary start.
 | Task field | Infra meaning |
 | --- | --- |
 | `service`, `user` | Unique task pair and exact vault-name components. Preserve identity across upgrades. |
-| `recipe_file` | Explicit absolute recipe path; otherwise derived from `service`. |
+| `recipe_file` | A non-default explicit path wins, including when missing (the run fails before credentials). NULL or the service default uses runtime overlay resolution. |
 | `enabled`, `cron` | Automatic scheduling; manual Run now does not enable the task. Cron and dates use `TZ`. |
 | `profile_dir` | Persistent browser session path within the configured profile root. |
 | `date_window_days` | Positive integer, default `90`; per task, not a Settings key or environment variable. |
 | Login fields | Persistent attempt/lock state owned by the daemon; use its reviewed clear/recovery path. |
+
+At `serve` startup, `reconcile_recipe_files` resets stored paths equal to the
+service's built-in default to NULL. New tasks also store NULL. With
+`BC_RECIPE_EXTRA_DIR`, a same-named file there wins and UI saves target that
+directory; otherwise the built-in directory is used. A non-default explicit path
+is preserved and never falls back when missing. Invalid legacy service names are
+left untouched during reconciliation so they cannot block daemon startup.
+The task-detail label and runner use the same path resolver.
+
+This startup update changes existing Task rows. Infra must retain its verified DB
+backup before adoption. If an existing task must keep a specific catalog recipe
+regardless of an overlay, use a reviewed non-default path through Infra's task
+configuration operation. The trusted adapter module path remains fixed to the
+catalog; the overlay does not select a Python module.
 
 `date_window_days` includes the run-start day. `--date-from-stdin` overrides the
 start for one run; the end is the captured current date in `TZ` (default `UTC`).
@@ -158,6 +176,7 @@ provider guide to state the actual coverage rather than claiming a day filter.
 | Settings `document_request_interval_seconds` | Generic document gate interval, 0.1–3600 seconds; default 5. Separate durable timestamp; all waits remain within the run deadline. Other adapters must explicitly opt into these engine primitives. |
 | Settings `ntfy_topic` | Explicit opt-in destination; absent or blank means no notification. |
 | Environment `NTFY_HOST` | Set `http://<HOST_IP>:7979` for the self-hosted receiver. Otherwise the existing default is public `https://ntfy.sh`. |
+| Environment `BC_RECIPE_EXTRA_DIR` | Unset/empty for this reviewed-catalog integration. If enabled, same-named recipe files shadow the catalog and UI saves target this directory; fork reference Compose sets `/apps/recipes`, so Infra must state its own effective value. |
 | Environment `TZ` | Explicit deployment timezone for cron and run dates. |
 | Environment `BC_DB_FILE`, `BC_DATA_DIR`, `BC_PROFILE_ROOT` | Persistent DB, runtime/journal coordination and browser profile locations; keep stable. |
 | Settings `download_recovery_timeout_seconds` | Positive startup recovery timeout, default `300` seconds. |
