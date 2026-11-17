@@ -47,6 +47,6 @@ jobs:
           fetch-depth: 1
       - name: Run agent
         if: steps.scope.outputs.review == 'true'
-        uses: pullfrog/pullfrog@e78ef9012f375d522bd40efe9e9357cb81eae1a1 # deployed on flowcool/ghostfolio-ibkr-sync
+        uses: pullfrog/pullfrog@44b58efe7fe431053c58aafa05e51e190f969685 # deployed on flowcool/ghostfolio-ibkr-sync
         with:
           prompt: ${{ inputs.prompt }}
