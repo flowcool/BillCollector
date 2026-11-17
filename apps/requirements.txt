@@ -12,7 +12,7 @@ bidict==0.24.1
 certifi==2026.10.23
 charset-normalizer==3.5.2
 click==8.5.0
-dnspython==2.9.1
+dnspython==2.9.2
 docutils==0.23
 fastapi==0.162.0
 flatten-json==0.1.14
