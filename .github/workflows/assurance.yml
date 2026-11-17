@@ -307,6 +307,7 @@ jobs:
           tags: |
             type=ref,event=tag
             type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
       - name: Publish the exact image that passed all gates
         env:
           IMAGE_TAGS: ${{ steps.metadata.outputs.tags }}
