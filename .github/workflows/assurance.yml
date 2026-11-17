@@ -299,6 +299,15 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote latest only from the current default-branch tip
+        id: tip
+        run: |
+          latest=false
+          if [ "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH" ] &&
+             [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$DEFAULT_BRANCH")" ]; then
+            latest=true
+          fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: metadata
         with:
@@ -307,6 +316,7 @@ jobs:
           tags: |
             type=ref,event=tag
             type=sha
+            type=raw,value=latest,enable=${{ steps.tip.outputs.latest == 'true' }}
       - name: Publish the exact image that passed all gates
         env:
           IMAGE_TAGS: ${{ steps.metadata.outputs.tags }}
